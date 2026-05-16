@@ -1,0 +1,32 @@
+{
+  "name": "amazon-jet-aviation-agent",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.64",
+    "@supabase/supabase-js": "^2.105.4",
+    "ai": "^6.0.184",
+    "next": "14.2.35",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.35",
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.6"
+  }
+}
