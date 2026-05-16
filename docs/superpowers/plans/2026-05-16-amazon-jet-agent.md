@@ -102,11 +102,11 @@ CHATWOOT_ACCOUNT_ID=
 Criar `.env.local`:
 
 ```
-OPENAI_API_KEY=<OPENAI_API_KEY>
+OPENAI_API_KEY=<your-openai-api-key>
 SUPABASE_URL=https://oncfstviluxmzenfuyot.supabase.co
-SUPABASE_SERVICE_KEY=<SUPABASE_SERVICE_KEY>
+SUPABASE_SERVICE_KEY=<your-supabase-service-key>
 CHATWOOT_BASE_URL=https://chat.leaderaperformance.com.br
-CHATWOOT_USER_TOKEN=<CHATWOOT_USER_TOKEN>
+CHATWOOT_USER_TOKEN=<your-chatwoot-user-token>
 CHATWOOT_ACCOUNT_ID=14
 ```
 
