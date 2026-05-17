@@ -1,14 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { POST } from '@/app/api/webhook/route'
 
 vi.mock('@/lib/agent', () => ({
-  runAgent: vi.fn().mockResolvedValue('Resposta do JET.'),
+  runAgent: vi.fn().mockResolvedValue('Reply do JET.'),
 }))
-
 vi.mock('@/lib/chatwoot', () => ({
   sendMessage: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock('@/lib/inboxes', () => ({
+  loadInboxByChatwootId: vi.fn(),
+  loadOpenAIConfig: vi.fn(),
+}))
+
+import { POST } from '@/app/api/webhook/route'
+import { runAgent } from '@/lib/agent'
+import { sendMessage } from '@/lib/chatwoot'
+import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
+
+const mockRunAgent = runAgent as ReturnType<typeof vi.fn>
+const mockSendMessage = sendMessage as ReturnType<typeof vi.fn>
+const mockLoadInbox = loadInboxByChatwootId as ReturnType<typeof vi.fn>
+const mockLoadOpenAI = loadOpenAIConfig as ReturnType<typeof vi.fn>
 
 function makeRequest(body: object) {
   return new NextRequest('http://localhost/api/webhook', {
@@ -18,79 +30,78 @@ function makeRequest(body: object) {
   })
 }
 
+const baseInbox = {
+  id: 'uuid', name: 'AJ', chatwoot_base_url: 'https://x.com',
+  chatwoot_account_id: 14, chatwoot_inbox_id: 45,
+  chatwoot_user_token: 'tok', system_prompt: 'PROMPT', enabled: true,
+}
+
 const validPayload = {
   body: {
     id: 13,
+    inbox_id: 45,
     messages: [{
-      id: 1,
-      content: 'preciso de uma peça',
-      message_type: 0,
+      id: 1, content: 'preciso de uma peça', message_type: 0,
       sender_type: 'Contact',
       sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João' },
     }],
-    meta: {
-      sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João' },
-    },
+    meta: { sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João' } },
     event: 'automation_event.message_created',
   },
 }
 
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockLoadInbox.mockResolvedValue(baseInbox)
+  mockLoadOpenAI.mockResolvedValue({ apiKey: 'sk-test', model: 'gpt-4o-mini' })
+})
+
 describe('POST /api/webhook', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('skip quando inbox não existe', async () => {
+    mockLoadInbox.mockResolvedValue(null)
+    const res = await POST(makeRequest(validPayload))
+    expect(res.status).toBe(200)
+    expect(mockRunAgent).not.toHaveBeenCalled()
   })
 
-  it('should skip outgoing messages (message_type === 1) and not call runAgent or sendMessage', async () => {
-    const { runAgent } = await import('@/lib/agent')
-    const { sendMessage } = await import('@/lib/chatwoot')
-
-    const payload = {
-      body: {
-        ...validPayload.body,
-        messages: [{
-          ...validPayload.body.messages[0],
-          message_type: 1,
-        }],
-      },
-    }
-
-    const req = makeRequest(payload)
-    const res = await POST(req)
-
+  it('skip quando inbox está disabled', async () => {
+    mockLoadInbox.mockResolvedValue({ ...baseInbox, enabled: false })
+    const res = await POST(makeRequest(validPayload))
     expect(res.status).toBe(200)
-    expect(runAgent).not.toHaveBeenCalled()
-    expect(sendMessage).not.toHaveBeenCalled()
+    expect(mockRunAgent).not.toHaveBeenCalled()
   })
 
-  it('should skip messages with null content and not call runAgent', async () => {
-    const { runAgent } = await import('@/lib/agent')
-
-    const payload = {
-      body: {
-        ...validPayload.body,
-        messages: [{
-          ...validPayload.body.messages[0],
-          content: null,
-        }],
-      },
-    }
-
-    const req = makeRequest(payload)
-    const res = await POST(req)
-
+  it('skip mensagens outgoing (message_type === 1)', async () => {
+    const p = { ...validPayload, body: { ...validPayload.body,
+      messages: [{ ...validPayload.body.messages[0], message_type: 1 }] } }
+    const res = await POST(makeRequest(p))
     expect(res.status).toBe(200)
-    expect(runAgent).not.toHaveBeenCalled()
+    expect(mockRunAgent).not.toHaveBeenCalled()
   })
 
-  it('should process valid message and call runAgent and sendMessage with correct args', async () => {
-    const { runAgent } = await import('@/lib/agent')
-    const { sendMessage } = await import('@/lib/chatwoot')
-
-    const req = makeRequest(validPayload)
-    const res = await POST(req)
-
+  it('skip content vazio', async () => {
+    const p = { ...validPayload, body: { ...validPayload.body,
+      messages: [{ ...validPayload.body.messages[0], content: null }] } }
+    const res = await POST(makeRequest(p))
     expect(res.status).toBe(200)
-    expect(runAgent).toHaveBeenCalledWith('5511999999999@s.whatsapp.net', 'preciso de uma peça')
-    expect(sendMessage).toHaveBeenCalledWith(13, 'Resposta do JET.')
+    expect(mockRunAgent).not.toHaveBeenCalled()
+  })
+
+  it('processa mensagem válida usando config da inbox', async () => {
+    const res = await POST(makeRequest(validPayload))
+    expect(res.status).toBe(200)
+    expect(mockLoadInbox).toHaveBeenCalledWith(45)
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      '5511999999999@s.whatsapp.net',
+      'preciso de uma peça',
+      'PROMPT',
+      'sk-test',
+      'gpt-4o-mini'
+    )
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      { baseUrl: 'https://x.com', accountId: 14, userToken: 'tok' },
+      13,
+      'Reply do JET.'
+    )
   })
 })
