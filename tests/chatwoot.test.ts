@@ -1,42 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sendMessage } from '@/lib/chatwoot'
 
+const fetchMock = vi.fn()
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', fetchMock)
+  fetchMock.mockReset()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 describe('sendMessage', () => {
-  let fetchMock: ReturnType<typeof vi.fn>
+  it('faz POST com URL, headers e body corretos a partir do config', async () => {
+    fetchMock.mockResolvedValue({ ok: true })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('successfully sends message with correct URL, headers, and body', async () => {
-    process.env.CHATWOOT_BASE_URL = 'https://chat.leaderaperformance.com.br'
-    process.env.CHATWOOT_USER_TOKEN = 'test-token-123'
-    process.env.CHATWOOT_ACCOUNT_ID = '14'
-
-    fetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-    })
-
-    await sendMessage(1, 'Hello from agent')
+    await sendMessage(
+      { baseUrl: 'https://chat.example.com', accountId: 14, userToken: 'tok-123' },
+      42,
+      'Olá!'
+    )
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://chat.leaderaperformance.com.br/api/v1/accounts/14/conversations/1/messages',
+      'https://chat.example.com/api/v1/accounts/14/conversations/42/messages',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'api_access_token': 'test-token-123',
+          'api_access_token': 'tok-123',
         },
         body: JSON.stringify({
-          content: 'Hello from agent',
+          content: 'Olá!',
           message_type: 'outgoing',
           private: false,
         }),
@@ -44,29 +39,17 @@ describe('sendMessage', () => {
     )
   })
 
-  it('does not throw on non-ok HTTP response (status 500)', async () => {
-    process.env.CHATWOOT_BASE_URL = 'https://chat.leaderaperformance.com.br'
-    process.env.CHATWOOT_USER_TOKEN = 'test-token-123'
-    process.env.CHATWOOT_ACCOUNT_ID = '14'
-
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-    })
-
-    // Should not throw
-    await expect(sendMessage(2, 'Test message')).resolves.toBeUndefined()
+  it('não lança erro quando fetch retorna não-ok', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 })
+    await expect(
+      sendMessage({ baseUrl: 'https://x.com', accountId: 1, userToken: 't' }, 1, 'oi')
+    ).resolves.toBeUndefined()
   })
 
-  it('does not throw on fetch network error', async () => {
-    process.env.CHATWOOT_BASE_URL = 'https://chat.leaderaperformance.com.br'
-    process.env.CHATWOOT_USER_TOKEN = 'test-token-123'
-    process.env.CHATWOOT_ACCOUNT_ID = '14'
-
-    fetchMock.mockRejectedValue(new Error('Network error'))
-
-    // Should not throw
-    await expect(sendMessage(3, 'Test message')).resolves.toBeUndefined()
+  it('não lança erro quando fetch dá throw', async () => {
+    fetchMock.mockRejectedValue(new Error('net err'))
+    await expect(
+      sendMessage({ baseUrl: 'https://x.com', accountId: 1, userToken: 't' }, 1, 'oi')
+    ).resolves.toBeUndefined()
   })
 })

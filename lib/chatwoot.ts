@@ -1,26 +1,18 @@
+import type { ChatwootApiConfig } from '@/lib/types'
+
 export async function sendMessage(
+  config: ChatwootApiConfig,
   conversationId: number,
   content: string
 ): Promise<void> {
-  const baseUrl = process.env.CHATWOOT_BASE_URL
-  const token = process.env.CHATWOOT_USER_TOKEN
-  const accountId = process.env.CHATWOOT_ACCOUNT_ID
-
-  if (!baseUrl || !token || !accountId) {
-    console.warn(
-      'Chatwoot env vars missing: CHATWOOT_BASE_URL, CHATWOOT_USER_TOKEN, or CHATWOOT_ACCOUNT_ID'
-    )
-    return
-  }
-
-  const url = `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`
+  const url = `${config.baseUrl}/api/v1/accounts/${config.accountId}/conversations/${conversationId}/messages`
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api_access_token': token,
+        'api_access_token': config.userToken,
       },
       body: JSON.stringify({
         content,
@@ -28,13 +20,10 @@ export async function sendMessage(
         private: false,
       }),
     })
-
     if (!response.ok) {
-      console.warn(
-        `Chatwoot API returned non-ok status: ${response.status} ${response.statusText}`
-      )
+      console.warn(`Chatwoot sendMessage failed: ${response.status}`)
     }
-  } catch (error) {
-    console.warn('Failed to send message to Chatwoot:', error)
+  } catch (err) {
+    console.warn('Chatwoot sendMessage error:', err)
   }
 }
