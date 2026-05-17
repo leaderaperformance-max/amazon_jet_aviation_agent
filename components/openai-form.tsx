@@ -36,7 +36,7 @@ export function OpenAIForm({ initial }: { initial: { openai_api_key: string | nu
       </div>
       <div>
         <Label htmlFor="model">Modelo</Label>
-        <Select value={model} onValueChange={setModel}>
+        <Select value={model} onValueChange={(v) => setModel(v ?? model)}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="gpt-4o-mini">gpt-4o-mini</SelectItem>
