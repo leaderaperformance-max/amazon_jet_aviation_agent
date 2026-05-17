@@ -35,23 +35,52 @@ function extractChatId(identifier: string | undefined, phoneNumber: string | nul
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const payload: WebhookPayload = await req.json()
 
+  // Log raw payload structure for debugging
+  console.log(`[webhook] RAW payload: ${JSON.stringify(payload).slice(0, 1500)}`)
+
   const chatwootInboxId = payload.body?.inbox_id
-  if (!chatwootInboxId) return NextResponse.json({ ok: true })
+  if (!chatwootInboxId) {
+    console.warn(`[webhook] SKIP: no body.inbox_id`)
+    return NextResponse.json({ ok: true })
+  }
 
   const inbox = await loadInboxByChatwootId(chatwootInboxId)
-  if (!inbox || !inbox.enabled) return NextResponse.json({ ok: true })
+  if (!inbox) {
+    console.warn(`[webhook] SKIP: inbox ${chatwootInboxId} not found in DB`)
+    return NextResponse.json({ ok: true })
+  }
+  if (!inbox.enabled) {
+    console.warn(`[webhook] SKIP: inbox ${chatwootInboxId} is disabled`)
+    return NextResponse.json({ ok: true })
+  }
 
   const message = payload.body?.messages?.[0]
-  if (!message || message.message_type === 1 || !message.content) {
+  if (!message) {
+    console.warn(`[webhook] SKIP: no messages[0]`)
+    return NextResponse.json({ ok: true })
+  }
+  if (message.message_type === 1) {
+    console.warn(`[webhook] SKIP: outgoing message (message_type=1)`)
+    return NextResponse.json({ ok: true })
+  }
+  if (!message.content) {
+    console.warn(`[webhook] SKIP: empty content`)
     return NextResponse.json({ ok: true })
   }
 
   const sessionId = payload.body?.meta?.sender?.identifier
   const chatId = extractChatId(sessionId, payload.body?.meta?.sender?.phone_number)
-  if (!sessionId || !chatId) return NextResponse.json({ ok: true })
+  if (!sessionId) {
+    console.warn(`[webhook] SKIP: no sessionId (meta.sender.identifier missing)`)
+    return NextResponse.json({ ok: true })
+  }
+  if (!chatId) {
+    console.warn(`[webhook] SKIP: cannot extract chatId from identifier="${sessionId}" phone="${payload.body?.meta?.sender?.phone_number}"`)
+    return NextResponse.json({ ok: true })
+  }
 
   if (!inbox.quepasa_host || !inbox.quepasa_token) {
-    console.warn(`Inbox ${inbox.id} sem QuePasa configurado`)
+    console.warn(`[webhook] SKIP: Inbox ${inbox.id} sem QuePasa configurado`)
     return NextResponse.json({ ok: true })
   }
 
