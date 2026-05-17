@@ -17,6 +17,8 @@ interface InboxFormProps {
     chatwoot_account_id: number
     chatwoot_inbox_id: number
     chatwoot_user_token: string
+    quepasa_host: string | null
+    quepasa_token: string | null
     system_prompt: string
     enabled: boolean
   }
@@ -32,6 +34,8 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
   const [accountId, setAccountId] = useState(String(inbox?.chatwoot_account_id ?? ''))
   const [inboxId, setInboxId] = useState(String(inbox?.chatwoot_inbox_id ?? ''))
   const [token, setToken] = useState(inbox?.chatwoot_user_token ?? '')
+  const [quepasaHost, setQuepasaHost] = useState(inbox?.quepasa_host ?? '')
+  const [quepasaToken, setQuepasaToken] = useState(inbox?.quepasa_token ?? '')
   const [enabled, setEnabled] = useState(inbox?.enabled ?? true)
   const [systemPrompt, setSystemPrompt] = useState(inbox?.system_prompt ?? defaultSystemPrompt ?? '')
   const [loading, setLoading] = useState(false)
@@ -53,6 +57,8 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
         chatwoot_account_id: Number(accountId),
         chatwoot_inbox_id: Number(inboxId),
         chatwoot_user_token: token,
+        quepasa_host: quepasaHost,
+        quepasa_token: quepasaToken,
         system_prompt: systemPrompt,
         enabled,
       }),
@@ -86,24 +92,41 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
             <Label htmlFor="name">Nome</Label>
             <Input id="name" value={name} onChange={e => setName(e.target.value)} required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="accountId">Chatwoot Account ID</Label>
-              <Input id="accountId" type="number" value={accountId} onChange={e => setAccountId(e.target.value)} required />
+
+          <div className="rounded-md border p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-muted-foreground">Chatwoot (recepção do webhook)</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="accountId">Account ID</Label>
+                <Input id="accountId" type="number" value={accountId} onChange={e => setAccountId(e.target.value)} required />
+              </div>
+              <div>
+                <Label htmlFor="inboxId">Inbox ID</Label>
+                <Input id="inboxId" type="number" value={inboxId} onChange={e => setInboxId(e.target.value)} required />
+              </div>
             </div>
             <div>
-              <Label htmlFor="inboxId">Chatwoot Inbox ID</Label>
-              <Input id="inboxId" type="number" value={inboxId} onChange={e => setInboxId(e.target.value)} required />
+              <Label htmlFor="baseUrl">Base URL</Label>
+              <Input id="baseUrl" type="url" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} required placeholder="https://chat.example.com" />
+            </div>
+            <div>
+              <Label htmlFor="token">User Token</Label>
+              <Input id="token" type="password" value={token} onChange={e => setToken(e.target.value)} required />
             </div>
           </div>
-          <div>
-            <Label htmlFor="baseUrl">Chatwoot Base URL</Label>
-            <Input id="baseUrl" type="url" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} required />
+
+          <div className="rounded-md border p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-muted-foreground">QuePasa (envio da resposta)</h3>
+            <div>
+              <Label htmlFor="quepasaHost">Host</Label>
+              <Input id="quepasaHost" type="url" value={quepasaHost} onChange={e => setQuepasaHost(e.target.value)} required placeholder="https://leaderaperformance.apibridge.top" />
+            </div>
+            <div>
+              <Label htmlFor="quepasaToken">Token (X-QUEPASA-TOKEN)</Label>
+              <Input id="quepasaToken" type="password" value={quepasaToken} onChange={e => setQuepasaToken(e.target.value)} required />
+            </div>
           </div>
-          <div>
-            <Label htmlFor="token">User Token</Label>
-            <Input id="token" type="password" value={token} onChange={e => setToken(e.target.value)} required />
-          </div>
+
           <div className="flex items-center gap-2">
             <Switch id="enabled" checked={enabled} onCheckedChange={setEnabled} />
             <Label htmlFor="enabled">Inbox ativa</Label>

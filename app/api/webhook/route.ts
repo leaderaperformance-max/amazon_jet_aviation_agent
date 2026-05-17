@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runAgent } from '@/lib/agent'
-import { sendMessage } from '@/lib/chatwoot'
+import { sendMessage } from '@/lib/quepasa'
 import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 
 interface WebhookPayload {
@@ -12,9 +12,24 @@ interface WebhookPayload {
       message_type?: number
     }>
     meta?: {
-      sender?: { identifier?: string }
+      sender?: { identifier?: string; phone_number?: string | null }
     }
   }
+}
+
+function extractChatId(identifier: string | undefined, phoneNumber: string | null | undefined): string | null {
+  // QuePasa CHATID = WhatsApp number digits only.
+  // identifier looks like "5593991565755@s.whatsapp.net" — strip suffix.
+  // phone_number looks like "+5593991565755" — strip the plus.
+  if (identifier) {
+    const digits = identifier.split('@')[0].replace(/\D/g, '')
+    if (digits) return digits
+  }
+  if (phoneNumber) {
+    const digits = phoneNumber.replace(/\D/g, '')
+    if (digits) return digits
+  }
+  return null
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -32,8 +47,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const sessionId = payload.body?.meta?.sender?.identifier
-  const conversationId = payload.body?.id
-  if (!sessionId || !conversationId) return NextResponse.json({ ok: true })
+  const chatId = extractChatId(sessionId, payload.body?.meta?.sender?.phone_number)
+  if (!sessionId || !chatId) return NextResponse.json({ ok: true })
+
+  if (!inbox.quepasa_host || !inbox.quepasa_token) {
+    console.warn(`Inbox ${inbox.id} sem QuePasa configurado`)
+    return NextResponse.json({ ok: true })
+  }
 
   const openai = await loadOpenAIConfig()
   const reply = await runAgent(
@@ -45,12 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   )
 
   await sendMessage(
-    {
-      baseUrl: inbox.chatwoot_base_url,
-      accountId: inbox.chatwoot_account_id,
-      userToken: inbox.chatwoot_user_token,
-    },
-    conversationId,
+    { host: inbox.quepasa_host, token: inbox.quepasa_token },
+    chatId,
     reply
   )
 

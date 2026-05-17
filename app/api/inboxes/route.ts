@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
       chatwoot_account_id: body.chatwoot_account_id,
       chatwoot_inbox_id: body.chatwoot_inbox_id,
       chatwoot_user_token: body.chatwoot_user_token,
+      quepasa_host: body.quepasa_host ?? null,
+      quepasa_token: body.quepasa_token ?? null,
       system_prompt: body.system_prompt,
       enabled: body.enabled ?? true,
     })

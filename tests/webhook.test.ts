@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server'
 vi.mock('@/lib/agent', () => ({
   runAgent: vi.fn().mockResolvedValue('Reply do JET.'),
 }))
-vi.mock('@/lib/chatwoot', () => ({
+vi.mock('@/lib/quepasa', () => ({
   sendMessage: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('@/lib/inboxes', () => ({
@@ -14,7 +14,7 @@ vi.mock('@/lib/inboxes', () => ({
 
 import { POST } from '@/app/api/webhook/route'
 import { runAgent } from '@/lib/agent'
-import { sendMessage } from '@/lib/chatwoot'
+import { sendMessage } from '@/lib/quepasa'
 import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 
 const mockRunAgent = runAgent as ReturnType<typeof vi.fn>
@@ -33,7 +33,9 @@ function makeRequest(body: object) {
 const baseInbox = {
   id: 'uuid', name: 'AJ', chatwoot_base_url: 'https://x.com',
   chatwoot_account_id: 14, chatwoot_inbox_id: 45,
-  chatwoot_user_token: 'tok', system_prompt: 'PROMPT', enabled: true,
+  chatwoot_user_token: 'tok',
+  quepasa_host: 'https://qp.example.com', quepasa_token: 'qp-token',
+  system_prompt: 'PROMPT', enabled: true,
 }
 
 const validPayload = {
@@ -45,7 +47,7 @@ const validPayload = {
       sender_type: 'Contact',
       sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João' },
     }],
-    meta: { sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João' } },
+    meta: { sender: { identifier: '5511999999999@s.whatsapp.net', name: 'João', phone_number: '+5511999999999' } },
     event: 'automation_event.message_created',
   },
 }
@@ -87,7 +89,15 @@ describe('POST /api/webhook', () => {
     expect(mockRunAgent).not.toHaveBeenCalled()
   })
 
-  it('processa mensagem válida usando config da inbox', async () => {
+  it('skip quando QuePasa não está configurado', async () => {
+    mockLoadInbox.mockResolvedValue({ ...baseInbox, quepasa_host: null, quepasa_token: null })
+    const res = await POST(makeRequest(validPayload))
+    expect(res.status).toBe(200)
+    expect(mockRunAgent).not.toHaveBeenCalled()
+    expect(mockSendMessage).not.toHaveBeenCalled()
+  })
+
+  it('processa mensagem válida e envia via QuePasa com chatId limpo', async () => {
     const res = await POST(makeRequest(validPayload))
     expect(res.status).toBe(200)
     expect(mockLoadInbox).toHaveBeenCalledWith(45)
@@ -99,8 +109,8 @@ describe('POST /api/webhook', () => {
       'gpt-4o-mini'
     )
     expect(mockSendMessage).toHaveBeenCalledWith(
-      { baseUrl: 'https://x.com', accountId: 14, userToken: 'tok' },
-      13,
+      { host: 'https://qp.example.com', token: 'qp-token' },
+      '5511999999999',
       'Reply do JET.'
     )
   })

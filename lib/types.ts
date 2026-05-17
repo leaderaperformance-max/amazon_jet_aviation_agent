@@ -39,6 +39,8 @@ export interface InboxConfig {
   chatwoot_account_id: number
   chatwoot_inbox_id: number
   chatwoot_user_token: string
+  quepasa_host: string | null
+  quepasa_token: string | null
   system_prompt: string
   enabled: boolean
 }
@@ -48,8 +50,7 @@ export interface OpenAIConfig {
   model: string
 }
 
-export interface ChatwootApiConfig {
-  baseUrl: string
-  accountId: number
-  userToken: string
+export interface QuePasaConfig {
+  host: string
+  token: string
 }
