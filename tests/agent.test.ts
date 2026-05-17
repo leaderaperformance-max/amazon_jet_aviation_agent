@@ -1,56 +1,52 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { runAgent } from '@/lib/agent'
 
 vi.mock('ai', () => ({ generateText: vi.fn() }))
 vi.mock('@/lib/memory', () => ({ loadHistory: vi.fn(), saveMessage: vi.fn() }))
-vi.mock('@ai-sdk/openai', () => ({ openai: vi.fn(() => 'mocked-model') }))
-vi.mock('@/lib/prompt', () => ({ getSystemPrompt: vi.fn(() => 'mocked-system-prompt') }))
+vi.mock('@ai-sdk/openai', () => ({
+  createOpenAI: vi.fn(() => (model: string) => `mocked-${model}`),
+}))
 
+import { runAgent } from '@/lib/agent'
 import { generateText } from 'ai'
 import { loadHistory, saveMessage } from '@/lib/memory'
+import { createOpenAI } from '@ai-sdk/openai'
 
 const mockGenerateText = generateText as ReturnType<typeof vi.fn>
 const mockLoadHistory = loadHistory as ReturnType<typeof vi.fn>
 const mockSaveMessage = saveMessage as ReturnType<typeof vi.fn>
+const mockCreateOpenAI = createOpenAI as ReturnType<typeof vi.fn>
 
 describe('runAgent', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockLoadHistory.mockResolvedValue([
-      { role: 'user', content: 'previous message' },
-      { role: 'assistant', content: 'previous reply' },
-    ])
-    mockGenerateText.mockResolvedValue({ text: 'Mock reply from JET.' })
-    mockSaveMessage.mockResolvedValue(undefined)
-  })
+  beforeEach(() => vi.clearAllMocks())
 
-  it('calls loadHistory with the sessionId', async () => {
-    await runAgent('session-id', 'user message')
-    expect(mockLoadHistory).toHaveBeenCalledWith('session-id')
-  })
+  it('chama generateText com prompt e modelo dados, salva user+assistant, retorna text', async () => {
+    mockLoadHistory.mockResolvedValue([{ role: 'user', content: 'olá' }])
+    mockGenerateText.mockResolvedValue({ text: 'Reply do JET' })
 
-  it('calls generateText with messages array containing history + new user message', async () => {
-    await runAgent('session-id', 'user message')
+    const result = await runAgent(
+      'session-1',
+      'preciso de uma peça',
+      'PROMPT_BASE com ${CURRENT_DATE}',
+      'sk-test',
+      'gpt-4o-mini'
+    )
+
+    expect(mockCreateOpenAI).toHaveBeenCalledWith({ apiKey: 'sk-test' })
     expect(mockGenerateText).toHaveBeenCalledWith(
       expect.objectContaining({
+        model: 'mocked-gpt-4o-mini',
+        system: expect.stringContaining('PROMPT_BASE com'),
         messages: [
-          { role: 'user', content: 'previous message' },
-          { role: 'assistant', content: 'previous reply' },
-          { role: 'user', content: 'user message' },
+          { role: 'user', content: 'olá' },
+          { role: 'user', content: 'preciso de uma peça' },
         ],
       })
     )
-  })
+    const callArgs = mockGenerateText.mock.calls[0][0]
+    expect(callArgs.system).not.toContain('${CURRENT_DATE}')
 
-  it('calls saveMessage twice: once with user role, once with assistant role', async () => {
-    await runAgent('session-id', 'user message')
-    expect(mockSaveMessage).toHaveBeenCalledTimes(2)
-    expect(mockSaveMessage).toHaveBeenCalledWith('session-id', 'user', 'user message')
-    expect(mockSaveMessage).toHaveBeenCalledWith('session-id', 'assistant', 'Mock reply from JET.')
-  })
-
-  it('returns the text from generateText', async () => {
-    const result = await runAgent('session-id', 'user message')
-    expect(result).toBe('Mock reply from JET.')
+    expect(mockSaveMessage).toHaveBeenCalledWith('session-1', 'user', 'preciso de uma peça')
+    expect(mockSaveMessage).toHaveBeenCalledWith('session-1', 'assistant', 'Reply do JET')
+    expect(result).toBe('Reply do JET')
   })
 })
