@@ -3,24 +3,29 @@ import { runAgent } from '@/lib/agent'
 import { sendMessage } from '@/lib/quepasa'
 import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 
-interface WebhookPayload {
-  body?: {
-    id?: number
-    inbox_id?: number
-    messages?: Array<{
-      content?: string | null
-      message_type?: number
-    }>
-    meta?: {
-      sender?: { identifier?: string; phone_number?: string | null }
-    }
-  }
+interface ChatwootSender {
+  identifier?: string
+  phone_number?: string | null
+}
+
+interface ChatwootMessage {
+  id?: number
+  content?: string | null
+  message_type?: number
+  conversation_id?: number
+  sender?: ChatwootSender
+}
+
+interface ChatwootWebhookPayload {
+  // Some events wrap data in `body`, others put it at root.
+  body?: ChatwootWebhookPayload
+  id?: number
+  inbox_id?: number
+  messages?: ChatwootMessage[]
+  meta?: { sender?: ChatwootSender }
 }
 
 function extractChatId(identifier: string | undefined, phoneNumber: string | null | undefined): string | null {
-  // QuePasa CHATID = WhatsApp number digits only.
-  // identifier looks like "5593991565755@s.whatsapp.net" — strip suffix.
-  // phone_number looks like "+5593991565755" — strip the plus.
   if (identifier) {
     const digits = identifier.split('@')[0].replace(/\D/g, '')
     if (digits) return digits
@@ -33,14 +38,15 @@ function extractChatId(identifier: string | undefined, phoneNumber: string | nul
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const payload: WebhookPayload = await req.json()
+  const raw: ChatwootWebhookPayload = await req.json()
+  // Unwrap if Chatwoot put data under `body` (automation events do this in some setups).
+  const data: ChatwootWebhookPayload = raw.body ?? raw
 
-  // Log raw payload structure for debugging
-  console.log(`[webhook] RAW payload: ${JSON.stringify(payload).slice(0, 1500)}`)
+  console.log(`[webhook] RAW: ${JSON.stringify(raw).slice(0, 1200)}`)
 
-  const chatwootInboxId = payload.body?.inbox_id
+  const chatwootInboxId = data.inbox_id
   if (!chatwootInboxId) {
-    console.warn(`[webhook] SKIP: no body.inbox_id`)
+    console.warn(`[webhook] SKIP: no inbox_id at root or body`)
     return NextResponse.json({ ok: true })
   }
 
@@ -50,11 +56,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
   if (!inbox.enabled) {
-    console.warn(`[webhook] SKIP: inbox ${chatwootInboxId} is disabled`)
+    console.warn(`[webhook] SKIP: inbox ${chatwootInboxId} disabled`)
     return NextResponse.json({ ok: true })
   }
 
-  const message = payload.body?.messages?.[0]
+  const message = data.messages?.[0]
   if (!message) {
     console.warn(`[webhook] SKIP: no messages[0]`)
     return NextResponse.json({ ok: true })
@@ -68,14 +74,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
-  const sessionId = payload.body?.meta?.sender?.identifier
-  const chatId = extractChatId(sessionId, payload.body?.meta?.sender?.phone_number)
+  // Sender info can be in either meta.sender (automation events) or messages[0].sender
+  const senderIdentifier = data.meta?.sender?.identifier ?? message.sender?.identifier
+  const senderPhone = data.meta?.sender?.phone_number ?? message.sender?.phone_number
+  const sessionId = senderIdentifier
+  const chatId = extractChatId(senderIdentifier, senderPhone)
+
   if (!sessionId) {
-    console.warn(`[webhook] SKIP: no sessionId (meta.sender.identifier missing)`)
+    console.warn(`[webhook] SKIP: no sender identifier`)
     return NextResponse.json({ ok: true })
   }
   if (!chatId) {
-    console.warn(`[webhook] SKIP: cannot extract chatId from identifier="${sessionId}" phone="${payload.body?.meta?.sender?.phone_number}"`)
+    console.warn(`[webhook] SKIP: cannot extract chatId from identifier="${senderIdentifier}" phone="${senderPhone}"`)
+    return NextResponse.json({ ok: true })
+  }
+
+  const conversationId = data.id ?? message.conversation_id
+  if (!conversationId) {
+    console.warn(`[webhook] SKIP: no conversation id`)
     return NextResponse.json({ ok: true })
   }
 
