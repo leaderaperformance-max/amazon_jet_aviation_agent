@@ -7,6 +7,8 @@ export async function sendMessage(
 ): Promise<void> {
   const url = `${config.host.replace(/\/$/, '')}/v4/send`
 
+  console.log(`[QuePasa] POST ${url} chatId=${chatId} contentLen=${content.length}`)
+
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -18,11 +20,9 @@ export async function sendMessage(
       },
       body: JSON.stringify({ text: content }),
     })
-    if (!response.ok) {
-      const body = await response.text().catch(() => '')
-      console.warn(`QuePasa sendMessage failed: ${response.status} ${body}`)
-    }
+    const body = await response.text().catch(() => '')
+    console.log(`[QuePasa] response status=${response.status} body=${body.slice(0, 500)}`)
   } catch (err) {
-    console.warn('QuePasa sendMessage error:', err)
+    console.error('[QuePasa] fetch error:', err)
   }
 }

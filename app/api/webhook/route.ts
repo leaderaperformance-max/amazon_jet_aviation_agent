@@ -55,6 +55,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
+  console.log(`[webhook] inbox=${inbox.id} chatwoot_inbox=${chatwootInboxId} sessionId=${sessionId} chatId=${chatId} contentLen=${message.content.length}`)
+
   const openai = await loadOpenAIConfig()
   const reply = await runAgent(
     sessionId,
@@ -63,6 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     openai.apiKey,
     openai.model
   )
+
+  console.log(`[webhook] replyLen=${reply.length} preview="${reply.slice(0, 80)}"`)
 
   await sendMessage(
     { host: inbox.quepasa_host, token: inbox.quepasa_token },
