@@ -28,7 +28,7 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
   const isEdit = !!inbox
 
   const [name, setName] = useState(inbox?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(inbox?.chatwoot_base_url ?? 'https://chat.leaderaperformance.com.br')
+  const [baseUrl, setBaseUrl] = useState(inbox?.chatwoot_base_url ?? '')
   const [accountId, setAccountId] = useState(String(inbox?.chatwoot_account_id ?? ''))
   const [inboxId, setInboxId] = useState(String(inbox?.chatwoot_inbox_id ?? ''))
   const [token, setToken] = useState(inbox?.chatwoot_user_token ?? '')
