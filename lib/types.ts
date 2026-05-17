@@ -31,3 +31,25 @@ export interface MemoryMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+export interface InboxConfig {
+  id: string
+  name: string
+  chatwoot_base_url: string
+  chatwoot_account_id: number
+  chatwoot_inbox_id: number
+  chatwoot_user_token: string
+  system_prompt: string
+  enabled: boolean
+}
+
+export interface OpenAIConfig {
+  apiKey: string
+  model: string
+}
+
+export interface ChatwootApiConfig {
+  baseUrl: string
+  accountId: number
+  userToken: string
+}
