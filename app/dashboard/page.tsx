@@ -1,81 +1,63 @@
-import Link from 'next/link'
 import { getServerClient } from '@/lib/supabase/server'
-import { buttonVariants } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { InboxToggle } from '@/components/inbox-toggle'
+import { computeAnalytics } from '@/lib/analytics'
+import { DateRangePicker } from '@/components/analytics/date-range-picker'
+import { KpiCards } from '@/components/analytics/kpi-cards'
+import { FunnelChart } from '@/components/analytics/funnel-chart'
+import { StatusDonut } from '@/components/analytics/status-donut'
+import { VolumeChart } from '@/components/analytics/volume-chart'
+import { TagDistribution } from '@/components/analytics/tag-distribution'
+import { InboxDistribution } from '@/components/analytics/inbox-distribution'
+import { TopContactsTable } from '@/components/analytics/top-contacts'
+import { InboxStatusList } from '@/components/analytics/inbox-status'
 
-export default async function DashboardPage() {
+function defaultRange(): { from: string; to: string } {
+  const to = new Date()
+  const from = new Date()
+  from.setDate(from.getDate() - 30)
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: { from?: string; to?: string }
+}) {
+  const { from: defaultFrom, to: defaultTo } = defaultRange()
+  const from = searchParams.from ?? defaultFrom
+  const to = searchParams.to ?? defaultTo
+
+  const analytics = await computeAnalytics(from, to)
+
   const supabase = getServerClient()
   const { data: inboxes } = await supabase
     .from('inboxes')
-    .select('*')
-    .order('created_at', { ascending: false })
-
-  const total = inboxes?.length ?? 0
-  const active = inboxes?.filter(i => i.enabled).length ?? 0
-
-  const since = new Date()
-  since.setHours(0, 0, 0, 0)
-  const { count: todayCount } = await supabase
-    .from('contacts')
-    .select('*', { count: 'exact', head: true })
-    .gte('first_seen_at', since.toISOString())
-  const { count: contactsTotal } = await supabase
-    .from('contacts')
-    .select('*', { count: 'exact', head: true })
+    .select('id, name, chatwoot_account_id, chatwoot_inbox_id, enabled')
+    .order('created_at', { ascending: true })
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader><CardTitle>Contatos</CardTitle></CardHeader>
-        <CardContent>
-          <p className="text-2xl font-bold">{todayCount ?? 0} <span className="text-base font-normal text-muted-foreground">hoje | {contactsTotal ?? 0} no total</span></p>
-          <Link href="/dashboard/contacts" className="text-sm text-blue-600 hover:underline">Ver todos →</Link>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle>Status</CardTitle></CardHeader>
-        <CardContent>
-          <p className="text-2xl font-bold">{active} <span className="text-base font-normal text-muted-foreground">de {total} inboxes ativas</span></p>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Inboxes</h2>
-        <Link href="/dashboard/inboxes/new" className={buttonVariants()}>+ Nova Inbox</Link>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Análise de Atendimento</h1>
+        <DateRangePicker initialFrom={from} initialTo={to} />
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Account ID</TableHead>
-              <TableHead>Inbox ID</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {inboxes?.map(inbox => (
-              <TableRow key={inbox.id}>
-                <TableCell className="font-medium">{inbox.name}</TableCell>
-                <TableCell>{inbox.chatwoot_account_id}</TableCell>
-                <TableCell>{inbox.chatwoot_inbox_id}</TableCell>
-                <TableCell><InboxToggle id={inbox.id} initial={inbox.enabled} /></TableCell>
-                <TableCell className="text-right">
-                  <Link href={`/dashboard/inboxes/${inbox.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>Editar</Link>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(!inboxes || inboxes.length === 0) && (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Nenhuma inbox cadastrada.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+      <KpiCards kpis={analytics.kpis} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <FunnelChart funnel={analytics.funnel} />
+        <StatusDonut distribution={analytics.statusDistribution} />
+      </div>
+
+      <VolumeChart data={analytics.volumeOverTime} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TagDistribution data={analytics.tagDistribution} />
+        <InboxDistribution data={analytics.inboxDistribution} />
+      </div>
+
+      <TopContactsTable contacts={analytics.topContacts} />
+
+      <InboxStatusList inboxes={inboxes ?? []} />
     </div>
   )
 }
