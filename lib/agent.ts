@@ -1,4 +1,4 @@
-import { generateText } from 'ai'
+import { generateText, stepCountIs } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { loadHistory, saveMessage } from '@/lib/memory'
 import { injectCurrentDate } from '@/lib/prompt'
@@ -21,6 +21,9 @@ export async function runAgent(
     model: openai(openaiModel),
     system: injectCurrentDate(systemPrompt),
     messages,
+    // Allow the model to call tools AND produce a final text answer
+    // (up to 5 steps: tool calls + final assistant text).
+    stopWhen: stepCountIs(5),
   }
   if (tools) (generateParams as { tools?: unknown }).tools = tools
 

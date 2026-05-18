@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('ai', () => ({
   generateText: vi.fn(),
   tool: vi.fn((cfg: unknown) => cfg),
+  stepCountIs: vi.fn((n: number) => ({ _stopAt: n })),
 }))
 vi.mock('@/lib/memory', () => ({ loadHistory: vi.fn(), saveMessage: vi.fn() }))
 vi.mock('@ai-sdk/openai', () => ({
