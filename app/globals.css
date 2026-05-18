@@ -4,23 +4,65 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* Light theme */
+    --background: 220 33% 97%;
+    --foreground: 222 30% 8%;
+    --surface: 0 0% 100%;
+    --surface-2: 218 33% 96%;
+    --border: 219 26% 91%;
+    --input: 218 33% 96%;
+    --ring: 218 79% 46%;
+    --primary: 215 73% 15%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 218 79% 46%;
+    --accent-foreground: 0 0% 100%;
+    --muted: 222 30% 8%;
+    --muted-foreground: 224 14% 42%;
+    --success: 158 64% 40%;
+    --warning: 32 95% 50%;
+    --danger: 0 84% 60%;
+    --chart-1: 218 73% 60%;
+    --chart-2: 220 27% 79%;
+    --chart-3: 168 64% 51%;
+    --chart-4: 32 95% 50%;
+    --chart-5: 0 84% 71%;
+    --chart-6: 254 91% 76%;
+    --radius: 12px;
   }
+
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background: 224 36% 7%;
+    --foreground: 222 38% 93%;
+    --surface: 223 41% 12%;
+    --surface-2: 223 38% 16%;
+    --border: 223 32% 25%;
+    --input: 223 38% 16%;
+    --ring: 218 73% 60%;
+    --primary: 220 24% 84%;
+    --primary-foreground: 224 36% 7%;
+    --accent: 218 73% 60%;
+    --accent-foreground: 224 36% 7%;
+    --muted: 223 38% 16%;
+    --muted-foreground: 220 17% 62%;
+    --success: 158 64% 40%;
+    --warning: 32 95% 50%;
+    --danger: 0 84% 60%;
+    --chart-1: 218 73% 60%;
+    --chart-2: 220 27% 79%;
+    --chart-3: 168 64% 51%;
+    --chart-4: 32 95% 50%;
+    --chart-5: 0 84% 71%;
+    --chart-6: 254 91% 76%;
   }
-  body { @apply bg-background text-foreground; }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
