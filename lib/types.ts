@@ -103,3 +103,70 @@ export interface ContactUpsertInput {
   last_message: string
   last_message_at: string
 }
+
+// ---------------- Analytics (Phase 3) ----------------
+
+export interface AnalyticsKpiDeltas {
+  newContacts: number
+  receivedMessages: number
+  aiOnlyPercent: number
+  avgResponseTimeSec: number
+  leadsWon: number
+  leadsLost: number
+  conversionRate: number
+}
+
+export interface AnalyticsKpis {
+  newContacts: number
+  receivedMessages: number
+  aiOnlyPercent: number          // 0..1
+  avgResponseTimeSec: number
+  leadsWon: number
+  leadsLost: number
+  conversionRate: number         // 0..1
+  activeNow: number
+  deltas: AnalyticsKpiDeltas
+}
+
+export interface FunnelStage {
+  stage: string
+  count: number
+  conversionFromPrev: number | null  // 0..1, null no primeiro
+}
+
+export interface VolumePoint {
+  date: string                    // YYYY-MM-DD
+  messages: number
+  newContacts: number
+}
+
+export interface TagCount {
+  tag: string
+  count: number
+}
+
+export interface InboxCount {
+  inbox_id: string
+  name: string
+  count: number
+}
+
+export interface TopContact {
+  id: string
+  name: string | null
+  phone_number: string | null
+  current_labels: string[]
+  message_count: number
+  status: ContactStatus
+  last_message_at: string | null
+}
+
+export interface AnalyticsResponse {
+  kpis: AnalyticsKpis
+  funnel: FunnelStage[]
+  statusDistribution: { ia: number; humano: number; encerrado: number }
+  volumeOverTime: VolumePoint[]
+  tagDistribution: TagCount[]
+  inboxDistribution: InboxCount[]
+  topContacts: TopContact[]
+}
