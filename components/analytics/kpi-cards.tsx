@@ -17,9 +17,9 @@ function fmtSec(s: number): string {
 function Delta({ value }: { value: number }) {
   if (value === 0) return null
   const sign = value > 0 ? '▲' : '▼'
-  const color = value > 0 ? 'text-green-600' : 'text-red-600'
+  const color = value > 0 ? 'text-success' : 'text-danger'
   return (
-    <span className={`text-xs ${color} ml-2`}>
+    <span className={`text-xs font-medium ${color} ml-2`}>
       {sign} {Math.abs(value * 100).toFixed(0)}%
     </span>
   )
@@ -28,9 +28,11 @@ function Delta({ value }: { value: number }) {
 function Kpi({ label, value, delta }: { label: string; value: string; delta?: number }) {
   return (
     <Card>
-      <CardContent className="pt-6">
-        <div className="text-sm text-muted-foreground">{label}</div>
-        <div className="text-2xl font-bold flex items-baseline">
+      <CardContent className="pt-6 pb-6">
+        <div className="text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">
+          {label}
+        </div>
+        <div className="text-[36px] leading-none font-bold tabular-nums flex items-baseline">
           {value}
           {delta !== undefined && <Delta value={delta} />}
         </div>
