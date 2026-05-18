@@ -36,6 +36,19 @@ vi.mock('@/lib/media/process', () => ({
 vi.mock('@/lib/part-number', () => ({
   validatePartNumber: vi.fn(),
 }))
+// Track inserted content so drainPending can return the same combined content
+let lastInsertedContent = 'oi'
+vi.mock('@/lib/debounce', () => ({
+  insertPending: vi.fn().mockImplementation(async (_sessionId: string, content: string) => {
+    lastInsertedContent = content
+    return { id: 'p1', received_at: '2026-05-18T00:00:00Z' }
+  }),
+  hasNewerPending: vi.fn().mockResolvedValue(false),
+  drainPending: vi.fn().mockImplementation(async () => ({ ids: ['p1'], combinedContent: lastInsertedContent })),
+}))
+vi.mock('@/lib/leads', () => ({
+  createLead: vi.fn().mockResolvedValue({ id: 'lead-1' }),
+}))
 
 import { POST } from '@/app/api/webhook/route'
 import { runAgent } from '@/lib/agent'

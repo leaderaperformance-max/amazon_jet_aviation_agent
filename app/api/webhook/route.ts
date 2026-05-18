@@ -11,6 +11,8 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import { validatePartNumber } from '@/lib/part-number'
+import { insertPending, hasNewerPending, drainPending } from '@/lib/debounce'
+import { createLead } from '@/lib/leads'
 
 interface ChatwootSender {
   id?: number
@@ -141,6 +143,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
+  const isHuman = message.sender_type === 'User'
+  const isContact = message.sender_type === 'Contact'
+
+  // Debounce: only for Contact messages
+  if (isContact) {
+    const inserted = await insertPending(sessionId, enrichedContent, message.id)
+    console.log(`[debounce] inserted pending ${inserted.id} for session ${sessionId}`)
+
+    // Wait 5s (configurable via DEBOUNCE_DELAY_MS env var, e.g. 0 for tests)
+    const delayMs = parseInt(process.env.DEBOUNCE_DELAY_MS ?? '5000', 10)
+    await new Promise(r => setTimeout(r, delayMs))
+
+    // Check if newer message arrived
+    const newer = await hasNewerPending(sessionId, inserted.received_at)
+    if (newer) {
+      console.log(`[debounce] newer message arrived, aborting`)
+      return NextResponse.json({ ok: true })
+    }
+
+    // Drain all pending for this session
+    const { combinedContent } = await drainPending(sessionId)
+    if (!combinedContent.trim()) {
+      console.warn(`[debounce] drained empty content`)
+      return NextResponse.json({ ok: true })
+    }
+
+    // Replace enrichedContent with combined
+    enrichedContent = combinedContent
+  }
+
   // Upsert contact (always)
   const { contact, wasNew } = await upsertContact({
     inbox_id: inbox.id,
@@ -155,8 +187,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   })
 
   // Save to memory: Contact and User both stored
-  const isHuman = message.sender_type === 'User'
-  const isContact = message.sender_type === 'Contact'
   if (isContact) {
     await saveMessage(sessionId, 'user', enrichedContent)
   } else if (isHuman) {
@@ -224,6 +254,64 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const result = await validatePartNumber(candidate)
         console.log(`[validate_pn] "${candidate}" → valid=${result.valid} format=${result.format}`)
         return result
+      },
+    }),
+    envia_pn: tool({
+      description: 'Envia lead qualificado (PN validado + quantidade + urgência) ao vendedor humano via WhatsApp. CHAME apenas quando tiver TODOS os dados qualificados.',
+      inputSchema: z.object({
+        part_number: z.string(),
+        quantity: z.string(),
+        urgency: z.enum(['AOG', 'rotina']),
+        customer_name: z.string().optional(),
+        customer_phone: z.string().optional(),
+        notes: z.string().optional(),
+      }),
+      execute: async (args) => {
+        // 1. Save lead
+        const lead = await createLead({
+          contact_id: contact.id,
+          part_number: args.part_number,
+          quantity: args.quantity,
+          urgency: args.urgency,
+          customer_name: args.customer_name ?? senderName ?? null,
+          customer_phone: args.customer_phone ?? senderPhone ?? null,
+          notes: args.notes ?? null,
+        })
+
+        // 2. Send WhatsApp to seller (if configured)
+        const sellerPhone = (inbox as unknown as { seller_phone?: string | null }).seller_phone
+        if (sellerPhone && inbox.quepasa_host && inbox.quepasa_token) {
+          const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
+          const urgencyEmoji = args.urgency === 'AOG' ? '🔴' : '🟡'
+          const sellerMsg = [
+            '🆕 *NOVO LEAD QUALIFICADO*',
+            '',
+            `👤 *Cliente:* ${args.customer_name ?? senderName ?? '(sem nome)'}`,
+            `📱 *WhatsApp:* ${args.customer_phone ?? senderPhone ?? '(não informado)'}`,
+            `🔧 *Part Number:* ${args.part_number}`,
+            `🔢 *Quantidade:* ${args.quantity}`,
+            `⚡ *Urgência:* ${args.urgency} ${urgencyEmoji}`,
+            '',
+            args.notes ? `📝 _${args.notes}_` : null,
+            '',
+            '🔗 Atender em:',
+            chatwootUrl,
+          ].filter(Boolean).join('\n')
+
+          await sendMessage(
+            { host: inbox.quepasa_host, token: inbox.quepasa_token },
+            sellerPhone,
+            sellerMsg
+          )
+        } else {
+          console.warn(`[envia_pn] seller_phone or quepasa not configured for inbox ${inbox.id}`)
+        }
+
+        // 3. Add tag orcamento_enviado
+        labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
+        await updateContactLabels(contact.id, labelsState)
+
+        return { ok: true, lead_id: lead.id }
       },
     }),
   }

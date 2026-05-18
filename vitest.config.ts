@@ -8,5 +8,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     passWithNoTests: true,
+    env: {
+      DEBOUNCE_DELAY_MS: '0',
+    },
   },
 })
