@@ -15,8 +15,26 @@ export default async function DashboardPage() {
   const total = inboxes?.length ?? 0
   const active = inboxes?.filter(i => i.enabled).length ?? 0
 
+  const since = new Date()
+  since.setHours(0, 0, 0, 0)
+  const { count: todayCount } = await supabase
+    .from('contacts')
+    .select('*', { count: 'exact', head: true })
+    .gte('first_seen_at', since.toISOString())
+  const { count: contactsTotal } = await supabase
+    .from('contacts')
+    .select('*', { count: 'exact', head: true })
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader><CardTitle>Contatos</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-2xl font-bold">{todayCount ?? 0} <span className="text-base font-normal text-muted-foreground">hoje | {contactsTotal ?? 0} no total</span></p>
+          <Link href="/dashboard/contacts" className="text-sm text-blue-600 hover:underline">Ver todos →</Link>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader><CardTitle>Status</CardTitle></CardHeader>
         <CardContent>

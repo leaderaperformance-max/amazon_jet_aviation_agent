@@ -16,6 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <Link href="/dashboard" className="text-lg font-bold">Amazon Jet Agent</Link>
             <nav className="flex gap-4 text-sm">
               <Link href="/dashboard" className="hover:underline">Inboxes</Link>
+              <Link href="/dashboard/contacts" className="hover:underline">Contatos</Link>
               <Link href="/dashboard/settings/openai" className="hover:underline">OpenAI</Link>
               <Link href="/dashboard/settings/users" className="hover:underline">Usuários</Link>
             </nav>
