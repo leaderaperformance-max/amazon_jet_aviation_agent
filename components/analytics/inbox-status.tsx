@@ -18,18 +18,19 @@ export function InboxStatusList({ inboxes }: { inboxes: Inbox[] }) {
         <Link href="/dashboard/inboxes/new" className={buttonVariants({ size: 'sm' })}>+ Nova Inbox</Link>
       </CardHeader>
       <CardContent>
-        <ul className="space-y-2">
+        <ul className="divide-y divide-border">
           {inboxes.map(i => (
-            <li key={i.id} className="flex items-center justify-between text-sm">
-              <span>
-                {i.enabled ? '🟢' : '🔴'} <span className="font-medium ml-1">{i.name}</span>
-                <span className="text-muted-foreground ml-2">{i.chatwoot_account_id}/{i.chatwoot_inbox_id}</span>
+            <li key={i.id} className="flex items-center justify-between py-3 text-sm">
+              <span className="flex items-center gap-3">
+                <span className={`w-2 h-2 rounded-full ${i.enabled ? 'bg-success' : 'bg-danger'}`} />
+                <span className="font-medium">{i.name}</span>
+                <span className="text-muted-foreground tabular-nums">{i.chatwoot_account_id}/{i.chatwoot_inbox_id}</span>
               </span>
-              <Link href={`/dashboard/inboxes/${i.id}`} className="text-blue-600 hover:underline">Editar</Link>
+              <Link href={`/dashboard/inboxes/${i.id}`} className="text-accent hover:underline">Editar</Link>
             </li>
           ))}
           {inboxes.length === 0 && (
-            <li className="text-muted-foreground">Nenhuma inbox configurada.</li>
+            <li className="py-3 text-muted-foreground">Nenhuma inbox configurada.</li>
           )}
         </ul>
       </CardContent>

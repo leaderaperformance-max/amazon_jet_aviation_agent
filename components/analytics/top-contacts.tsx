@@ -17,12 +17,29 @@ function formatRelative(iso: string | null): string {
 }
 
 function statusBadge(status: string) {
-  const colors: Record<string, string> = {
-    ia: 'bg-green-100 text-green-800',
-    humano: 'bg-yellow-100 text-yellow-800',
-    encerrado: 'bg-gray-100 text-gray-800',
+  const map: Record<string, string> = {
+    ia: 'bg-success/15 text-success',
+    humano: 'bg-warning/15 text-warning',
+    encerrado: 'bg-muted/40 text-muted-foreground',
   }
-  return <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? ''}`}>{status.toUpperCase()}</span>
+  return (
+    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wider uppercase ${map[status] ?? ''}`}>
+      {status}
+    </span>
+  )
+}
+
+function tagPill(label: string) {
+  const terminal: Record<string, string> = {
+    lead_ganho: 'bg-success/12 text-success',
+    lead_perdido: 'bg-danger/12 text-danger',
+  }
+  const cls = terminal[label] ?? 'bg-accent/12 text-accent'
+  return (
+    <span key={label} className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-medium mr-1 ${cls}`}>
+      {label}
+    </span>
+  )
 }
 
 export function TopContactsTable({ contacts }: { contacts: TopContact[] }) {
@@ -45,19 +62,15 @@ export function TopContactsTable({ contacts }: { contacts: TopContact[] }) {
             {contacts.map(c => (
               <TableRow key={c.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/dashboard/contacts?q=${encodeURIComponent(c.phone_number ?? '')}`} className="hover:underline">
+                  <Link href={`/dashboard/contacts?q=${encodeURIComponent(c.phone_number ?? '')}`} className="hover:text-accent transition-colors">
                     {c.name ?? '-'}
                   </Link>
                 </TableCell>
-                <TableCell>{c.phone_number ?? '-'}</TableCell>
-                <TableCell>
-                  {c.current_labels.map(l => (
-                    <span key={l} className="inline-flex px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-800 mr-1">{l}</span>
-                  ))}
-                </TableCell>
-                <TableCell>{c.message_count}</TableCell>
+                <TableCell className="tabular-nums">{c.phone_number ?? '-'}</TableCell>
+                <TableCell>{c.current_labels.map(tagPill)}</TableCell>
+                <TableCell className="tabular-nums">{c.message_count}</TableCell>
                 <TableCell>{statusBadge(c.status)}</TableCell>
-                <TableCell className="text-sm">{formatRelative(c.last_message_at)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{formatRelative(c.last_message_at)}</TableCell>
               </TableRow>
             ))}
             {contacts.length === 0 && (
