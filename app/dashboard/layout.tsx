@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getServerClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
+import { LogoFull } from '@/components/brand/logo-full'
+import { ThemeToggle } from '@/components/brand/theme-toggle'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = getServerClient()
@@ -9,19 +11,30 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect('/login')
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b">
+    <div className="min-h-screen flex flex-col bg-background">
+      <header className="border-b border-border bg-surface">
         <div className="container mx-auto flex items-center justify-between py-4">
-          <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="text-lg font-bold">Amazon Jet Agent</Link>
-            <nav className="flex gap-4 text-sm">
-              <Link href="/dashboard" className="hover:underline">Inboxes</Link>
-              <Link href="/dashboard/contacts" className="hover:underline">Contatos</Link>
-              <Link href="/dashboard/settings/openai" className="hover:underline">OpenAI</Link>
-              <Link href="/dashboard/settings/users" className="hover:underline">Usuários</Link>
+          <div className="flex items-center gap-8">
+            <Link href="/dashboard" className="hover:opacity-80 transition-opacity">
+              <LogoFull size="sm" />
+            </Link>
+            <nav className="flex gap-1 text-sm">
+              <Link href="/dashboard" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
+                Análise
+              </Link>
+              <Link href="/dashboard/contacts" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
+                Contatos
+              </Link>
+              <Link href="/dashboard/settings/openai" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
+                OpenAI
+              </Link>
+              <Link href="/dashboard/settings/users" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
+                Usuários
+              </Link>
             </nav>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="text-sm text-muted-foreground">{user.email}</span>
             <form action="/api/auth/logout" method="POST">
               <Button type="submit" variant="outline" size="sm">Sair</Button>
