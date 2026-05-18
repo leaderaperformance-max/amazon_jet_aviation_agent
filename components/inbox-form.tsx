@@ -19,6 +19,7 @@ interface InboxFormProps {
     chatwoot_user_token: string
     quepasa_host: string | null
     quepasa_token: string | null
+    seller_phone: string | null
     system_prompt: string
     enabled: boolean
   }
@@ -36,6 +37,7 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
   const [token, setToken] = useState(inbox?.chatwoot_user_token ?? '')
   const [quepasaHost, setQuepasaHost] = useState(inbox?.quepasa_host ?? '')
   const [quepasaToken, setQuepasaToken] = useState(inbox?.quepasa_token ?? '')
+  const [sellerPhone, setSellerPhone] = useState(inbox?.seller_phone ?? '')
   const [enabled, setEnabled] = useState(inbox?.enabled ?? true)
   const [systemPrompt, setSystemPrompt] = useState(inbox?.system_prompt ?? defaultSystemPrompt ?? '')
   const [loading, setLoading] = useState(false)
@@ -59,6 +61,7 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
         chatwoot_user_token: token,
         quepasa_host: quepasaHost,
         quepasa_token: quepasaToken,
+        seller_phone: sellerPhone || null,
         system_prompt: systemPrompt,
         enabled,
       }),
@@ -124,6 +127,17 @@ export function InboxForm({ inbox, defaultSystemPrompt }: InboxFormProps) {
             <div>
               <Label htmlFor="quepasaToken">Token (X-QUEPASA-TOKEN)</Label>
               <Input id="quepasaToken" type="password" value={quepasaToken} onChange={e => setQuepasaToken(e.target.value)} required />
+            </div>
+            <div>
+              <Label htmlFor="sellerPhone">WhatsApp do vendedor</Label>
+              <Input
+                id="sellerPhone"
+                type="text"
+                value={sellerPhone}
+                onChange={e => setSellerPhone(e.target.value)}
+                placeholder="5591981617148"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Número do vendedor que receberá os leads qualificados (somente dígitos, ex: 5591981617148)</p>
             </div>
           </div>
 

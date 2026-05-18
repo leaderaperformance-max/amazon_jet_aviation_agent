@@ -24,7 +24,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   const body = await req.json()
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  for (const key of ['name','chatwoot_base_url','chatwoot_account_id','chatwoot_inbox_id','chatwoot_user_token','quepasa_host','quepasa_token','system_prompt','enabled']) {
+  for (const key of ['name','chatwoot_base_url','chatwoot_account_id','chatwoot_inbox_id','chatwoot_user_token','quepasa_host','quepasa_token','seller_phone','system_prompt','enabled']) {
     if (key in body) update[key] = body[key]
   }
 

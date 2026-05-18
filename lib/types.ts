@@ -41,6 +41,7 @@ export interface InboxConfig {
   chatwoot_user_token: string
   quepasa_host: string | null
   quepasa_token: string | null
+  seller_phone: string | null
   system_prompt: string
   enabled: boolean
 }
