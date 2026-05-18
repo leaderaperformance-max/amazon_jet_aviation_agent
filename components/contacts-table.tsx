@@ -27,17 +27,26 @@ function formatRelative(iso: string | null): string {
 }
 
 function statusBadge(status: string) {
-  const colors: Record<string, string> = {
-    ia: 'bg-green-100 text-green-800',
-    humano: 'bg-yellow-100 text-yellow-800',
-    encerrado: 'bg-gray-100 text-gray-800',
+  const map: Record<string, string> = {
+    ia: 'bg-success/15 text-success',
+    humano: 'bg-warning/15 text-warning',
+    encerrado: 'bg-muted/40 text-muted-foreground',
   }
-  return <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? ''}`}>{status.toUpperCase()}</span>
+  return (
+    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wider uppercase ${map[status] ?? ''}`}>
+      {status}
+    </span>
+  )
 }
 
 function labelBadge(label: string) {
+  const terminal: Record<string, string> = {
+    lead_ganho: 'bg-success/12 text-success',
+    lead_perdido: 'bg-danger/12 text-danger',
+  }
+  const cls = terminal[label] ?? 'bg-accent/12 text-accent'
   return (
-    <span key={label} className="inline-flex px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-800 mr-1">
+    <span key={label} className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-medium mr-1 ${cls}`}>
       {label}
     </span>
   )
