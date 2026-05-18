@@ -9,6 +9,8 @@ import { saveMessage } from '@/lib/memory'
 import { addLabel, removeLabel } from '@/lib/tags'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
+import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
+import { validatePartNumber } from '@/lib/part-number'
 
 interface ChatwootSender {
   id?: number
@@ -73,8 +75,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const message = data.messages?.[0]
-  if (!message || !message.content) {
-    console.warn(`[webhook] SKIP: no message or empty content`)
+  if (!message) {
+    console.warn(`[webhook] SKIP: no message`)
     return NextResponse.json({ ok: true })
   }
 
@@ -117,6 +119,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const labels = data.conversation?.labels ?? data.labels ?? []
 
+  // Process attachments (audio/image/pdf) — enriches the content
+  const attachments = ((message as unknown) as { attachments?: ChatwootAttachment[] }).attachments ?? []
+  let enrichedContent = message.content ?? ''
+
+  for (const att of attachments) {
+    try {
+      const processed = await processAttachment(att)
+      if (processed) {
+        enrichedContent = enrichedContent
+          ? `${enrichedContent}\n\n${processed}`
+          : processed
+      }
+    } catch (err) {
+      console.warn('[webhook] attachment processing error:', err)
+    }
+  }
+
+  if (!enrichedContent.trim()) {
+    console.warn(`[webhook] SKIP: no usable content (no text and no processable attachment)`)
+    return NextResponse.json({ ok: true })
+  }
+
   // Upsert contact (always)
   const { contact, wasNew } = await upsertContact({
     inbox_id: inbox.id,
@@ -126,7 +150,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     phone_number: senderPhone ?? null,
     whatsapp_identifier: senderIdent ?? null,
     current_labels: labels,
-    last_message: message.content,
+    last_message: enrichedContent,
     last_message_at: new Date().toISOString(),
   })
 
@@ -134,9 +158,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const isHuman = message.sender_type === 'User'
   const isContact = message.sender_type === 'Contact'
   if (isContact) {
-    await saveMessage(sessionId, 'user', message.content)
+    await saveMessage(sessionId, 'user', enrichedContent)
   } else if (isHuman) {
-    await saveMessage(sessionId, 'user', `[atendente]: ${message.content}`)
+    await saveMessage(sessionId, 'user', `[atendente]: ${message.content ?? ''}`)
   }
 
   // Only Contact messages can trigger a reply
@@ -188,12 +212,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return { ok: true, labels: labelsState }
       },
     }),
+    validate_part_number: tool({
+      description: 'Valida se o texto é um Part Number aeronáutico legítimo. ' +
+                   'Cobre MIL-SPEC (AN/MS/NAS/M-series), NSN, ATA e fabricantes ' +
+                   '(Cessna, Garmin, Beechcraft, Piper, Honeywell, etc.). ' +
+                   'Retorna formato, fabricante, confidence e PN normalizado.',
+      inputSchema: z.object({
+        candidate: z.string().describe('O texto fornecido pelo cliente, possível PN'),
+      }),
+      execute: async ({ candidate }: { candidate: string }) => {
+        const result = await validatePartNumber(candidate)
+        console.log(`[validate_pn] "${candidate}" → valid=${result.valid} format=${result.format}`)
+        return result
+      },
+    }),
   }
 
   const openai = await loadOpenAIConfig()
   const reply = await runAgent(
     sessionId,
-    message.content,
+    enrichedContent,
     inbox.system_prompt,
     openai.apiKey,
     openai.model,

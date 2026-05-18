@@ -30,6 +30,12 @@ vi.mock('@/lib/supabase/admin', () => ({
     }),
   })),
 }))
+vi.mock('@/lib/media/process', () => ({
+  processAttachment: vi.fn(),
+}))
+vi.mock('@/lib/part-number', () => ({
+  validatePartNumber: vi.fn(),
+}))
 
 import { POST } from '@/app/api/webhook/route'
 import { runAgent } from '@/lib/agent'
@@ -38,6 +44,8 @@ import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 import { upsertContact } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { addLabel } from '@/lib/tags'
+import { processAttachment } from '@/lib/media/process'
+const mockProcessAttachment = processAttachment as ReturnType<typeof vi.fn>
 
 const mockRunAgent = runAgent as ReturnType<typeof vi.fn>
 const mockSendMessage = sendMessage as ReturnType<typeof vi.fn>
@@ -184,5 +192,29 @@ describe('POST /api/webhook', () => {
     await POST(makeRequest(p))
     expect(mockRunAgent).toHaveBeenCalled()
     expect(mockSendMessage).toHaveBeenCalled()
+  })
+
+  it('processa attachment de áudio e usa o conteúdo enriquecido como user message', async () => {
+    mockProcessAttachment.mockResolvedValue('[ÁUDIO TRANSCRITO]: oi preciso de uma peça')
+
+    const payload = {
+      ...incomingFromContact,
+      messages: [{
+        ...incomingFromContact.messages[0],
+        content: null,
+        attachments: [{
+          data_url: 'https://chat.example.com/audio.ogg',
+          content_type: 'audio/ogg',
+          file_type: 'audio',
+        }],
+      }],
+    }
+
+    const res = await POST(makeRequest(payload))
+    expect(res.status).toBe(200)
+    expect(mockProcessAttachment).toHaveBeenCalled()
+    // O runAgent recebe o conteúdo enriquecido como 2o arg (userMessage)
+    const callArgs = mockRunAgent.mock.calls[0]
+    expect(callArgs[1]).toBe('[ÁUDIO TRANSCRITO]: oi preciso de uma peça')
   })
 })
