@@ -23,6 +23,13 @@ vi.mock('@/lib/tags', () => ({
   addLabel: vi.fn(),
   removeLabel: vi.fn(),
 }))
+vi.mock('@/lib/supabase/admin', () => ({
+  getAdminClient: vi.fn(() => ({
+    from: vi.fn().mockReturnValue({
+      insert: vi.fn().mockResolvedValue({ error: null }),
+    }),
+  })),
+}))
 
 import { POST } from '@/app/api/webhook/route'
 import { runAgent } from '@/lib/agent'
