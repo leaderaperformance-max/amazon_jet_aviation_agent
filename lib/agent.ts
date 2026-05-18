@@ -22,7 +22,7 @@ export async function runAgent(
   // The trailing position keeps the instruction fresh in the model's mind right before it acts.
   const labelsCtx = currentLabels.length > 0 ? currentLabels.join(', ') : '(nenhuma)'
   const toolDirective = tools
-    ? `\n\n---\n\n## ⚠️ REGRA OBRIGATÓRIA DE TAGS (siga ANTES de responder)\n\nTAGS ATUAIS DESTA CONVERSA: [${labelsCtx}]\n\nANTES de redigir sua resposta de texto, OBRIGATORIAMENTE pense quais tags se aplicam ao estado da conversa e CHAME as tools add_label / remove_label conforme a tabela:\n\n| Situação | Ação |\n|---|---|\n| Se "novo_lead" não está em TAGS ATUAIS | CHAME add_label('novo_lead') |\n| Você está prestes a pedir o Part Number | CHAME add_label('aguardando_pn') |\n| O cliente acabou de fornecer o PN | CHAME remove_label('aguardando_pn') E add_label('pendente_orcamento') |\n| Você está dizendo "Recebi os dados..." (cotação será enviada) | CHAME add_label('orcamento_enviado') |\n| Cliente confirmou fechamento/compra | CHAME add_label('lead_ganho') |\n| Cliente desistiu / sem perfil | CHAME add_label('lead_perdido') |\n\nAs tools são INVISÍVEIS para o cliente. NUNCA mencione tags na resposta de texto. Chame as tools PRIMEIRO, depois escreva a resposta normal.`
+    ? `\n\n---\n\n## ⚠️ REGRA OBRIGATÓRIA DE TOOLS (siga ANTES de responder)\n\nTAGS ATUAIS DESTA CONVERSA: [${labelsCtx}]\n\nVocê tem 4 tools disponíveis. ANTES de redigir sua resposta de texto, OBRIGATORIAMENTE decida quais tools chamar:\n\n### 🏷️ TAGS — \`add_label\` / \`remove_label\`\n\n| Situação | Ação |\n|---|---|\n| "novo_lead" não está em TAGS ATUAIS | CHAME add_label('novo_lead') |\n| Você está prestes a pedir o Part Number | CHAME add_label('aguardando_pn') |\n| O cliente acabou de fornecer o PN | CHAME remove_label('aguardando_pn') E add_label('pendente_orcamento') |\n| Cliente confirmou fechamento/compra | CHAME add_label('lead_ganho') |\n| Cliente desistiu / sem perfil | CHAME add_label('lead_perdido') |\n\n### 🔍 VALIDAÇÃO DE PN — \`validate_part_number\`\n\nSEMPRE que o cliente mandar algo que pareça um Part Number (combinação de letras/números, com hífens, ex: MS16624-2037, AN3-5A, 010-00696-01, BCFA1-100), CHAME \`validate_part_number({ candidate: "<texto exato>" })\` ANTES de prosseguir.\n\n### 📨 ENVIO AO VENDEDOR — \`envia_pn\` (CRÍTICO)\n\nAssim que tiver os 3 dados qualificados na conversa (mesmo que em mensagens diferentes), CHAME \`envia_pn\` IMEDIATAMENTE:\n\n1. Part Number → já validado via validate_part_number(valid:true)\n2. Quantidade → cliente disse "2", "2 unidades", "5", "uma", etc. Aceite typos como "2 unifades" como "2 unidades".\n3. Urgência → "AOG" se cliente mencionou urgência/parado/em solo/emergência; caso contrário "rotina"\n\nExemplo de chamada:\n\`envia_pn({ part_number: "MS16624-2037", quantity: "2 unidades", urgency: "AOG", customer_name: "<nome se souber>", customer_phone: "<telefone se souber>", notes: "<contexto extra opcional>" })\`\n\nApós chamar envia_pn, responda ao cliente:\n- Para AOG: "Dados enviados ao AOG Desk. Especialista vai te contatar agora."\n- Para rotina: "Recebi os dados. Nosso especialista vai te retornar com a cotação em até 48h úteis."\n\nNÃO chame envia_pn duas vezes na mesma conversa, exceto se cliente mandar PN diferente.\nNÃO chame envia_pn sem PN validado.\n\n---\n\nAs tools são INVISÍVEIS para o cliente. NUNCA mencione tags ou tools na resposta de texto. CHAME AS TOOLS PRIMEIRO, depois escreva a resposta.`
     : ''
 
   const generateParams: Parameters<typeof generateText>[0] = {
@@ -39,12 +39,19 @@ export async function runAgent(
 
   const result = await generateText(generateParams)
   const { text } = result
-  const toolCalls = (result as { toolCalls?: unknown[] }).toolCalls ?? []
-  const steps = (result as { steps?: unknown[] }).steps ?? []
+  const steps = (result as { steps?: Array<{ toolCalls?: Array<{ toolName?: string }> }> }).steps ?? []
 
-  console.log(`[agent] toolCalls=${toolCalls.length} steps=${steps.length} textLen=${text.length}`)
-  if (toolCalls.length > 0) {
-    console.log(`[agent] toolCalls detail: ${JSON.stringify(toolCalls).slice(0, 500)}`)
+  // Count tool calls across all steps (not just the final one)
+  const allToolCalls: { toolName: string; step: number }[] = []
+  steps.forEach((s, i) => {
+    (s.toolCalls ?? []).forEach(tc => {
+      if (tc.toolName) allToolCalls.push({ toolName: tc.toolName, step: i })
+    })
+  })
+
+  console.log(`[agent] totalToolCalls=${allToolCalls.length} steps=${steps.length} textLen=${text.length}`)
+  if (allToolCalls.length > 0) {
+    console.log(`[agent] toolCalls: ${allToolCalls.map(t => `${t.toolName}@step${t.step}`).join(', ')}`)
   }
 
   await saveMessage(sessionId, 'user', userMessage)
