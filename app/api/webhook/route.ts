@@ -257,24 +257,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     }),
     envia_pn: tool({
-      description: 'Envia lead qualificado (PN validado + quantidade + urgência) ao vendedor humano via WhatsApp. CHAME apenas quando tiver TODOS os dados qualificados.',
+      description: 'Envia lead qualificado (PN validado + quantidade + urgência) ao vendedor humano via WhatsApp. CHAME apenas quando tiver TODOS os dados qualificados. Nome e telefone do cliente vêm automaticamente do contato — você NÃO precisa passar.',
       inputSchema: z.object({
         part_number: z.string(),
         quantity: z.string(),
         urgency: z.enum(['AOG', 'rotina']),
-        customer_name: z.string().optional(),
-        customer_phone: z.string().optional(),
         notes: z.string().optional(),
       }),
       execute: async (args) => {
+        // Customer name/phone vêm SEMPRE do payload Chatwoot (closure), nunca do LLM
+        const finalName = (senderName && senderName.trim()) || null
+        const finalPhone = (senderPhone && senderPhone.trim()) || null
+
+        console.log(`[envia_pn] firing PN=${args.part_number} qty=${args.quantity} urg=${args.urgency} name=${finalName} phone=${finalPhone}`)
+
         // 1. Save lead
         const lead = await createLead({
           contact_id: contact.id,
           part_number: args.part_number,
           quantity: args.quantity,
           urgency: args.urgency,
-          customer_name: args.customer_name ?? senderName ?? null,
-          customer_phone: args.customer_phone ?? senderPhone ?? null,
+          customer_name: finalName,
+          customer_phone: finalPhone,
           notes: args.notes ?? null,
         })
 
@@ -286,8 +290,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const sellerMsg = [
             '🆕 *NOVO LEAD QUALIFICADO*',
             '',
-            `👤 *Cliente:* ${args.customer_name ?? senderName ?? '(sem nome)'}`,
-            `📱 *WhatsApp:* ${args.customer_phone ?? senderPhone ?? '(não informado)'}`,
+            `👤 *Cliente:* ${finalName ?? '(sem nome)'}`,
+            `📱 *WhatsApp:* ${finalPhone ?? '(não informado)'}`,
             `🔧 *Part Number:* ${args.part_number}`,
             `🔢 *Quantidade:* ${args.quantity}`,
             `⚡ *Urgência:* ${args.urgency} ${urgencyEmoji}`,
