@@ -7,6 +7,7 @@ import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 import { upsertContact, updateContactLabels } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { addLabel, removeLabel } from '@/lib/tags'
+import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
 
 interface ChatwootSender {
@@ -81,6 +82,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (message.sender_type === 'AgentBot') {
     console.log(`[webhook] SKIP: AgentBot (our own reply)`)
     return NextResponse.json({ ok: true })
+  }
+
+  // Dedup: Chatwoot may fire the same message_created event twice (inbox webhook + automation).
+  // Use an atomic insert with unique constraint to ensure each message is processed once.
+  if (message.id) {
+    const supabaseAdmin = getAdminClient()
+    const { error: dupErr } = await supabaseAdmin
+      .from('processed_webhook_messages')
+      .insert({ chatwoot_message_id: message.id })
+    if (dupErr) {
+      // 23505 = unique_violation in Postgres
+      if ((dupErr as { code?: string }).code === '23505') {
+        console.log(`[webhook] SKIP: duplicate message ${message.id}`)
+        return NextResponse.json({ ok: true })
+      }
+      console.warn(`[webhook] dedup insert error (continuing):`, dupErr)
+    }
   }
 
   const conversationId = data.id ?? message.conversation_id
