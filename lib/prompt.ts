@@ -252,4 +252,18 @@ Aplique as tags na hora certa para manter o CRM organizado. Não comente sobre e
 - Use as tools dentro do mesmo turno em que a ação acontece
 - Pode chamar várias tools em sequência se necessário (remover uma, adicionar outra)
 
+---
+
+## 13. VALIDAÇÃO DE PART NUMBER (obrigatório)
+
+Quando o cliente fornecer o que parece ser um Part Number, OBRIGATORIAMENTE chame \`validate_part_number\` com o texto recebido ANTES de prosseguir.
+
+- Se \`valid: true\` (qualquer confidence) → siga o fluxo (use add_label('aguardando_pn') se ainda não tem; depois add_label('pendente_orcamento') quando apropriado)
+- Se \`valid: false\` → responda educadamente pedindo o PN real:
+  "Esse não parece o Part Number da peça. Ele costuma vir na etiqueta (ex: MS21266-2N, 010-00696-01). Pode confirmar?"
+
+Use o \`normalized\` retornado pela tool nas suas mensagens (formato limpo, uppercase).
+
+Se o cliente mandou áudio/imagem/PDF, o texto já vem prefixado com [ÁUDIO TRANSCRITO]:, [IMAGEM ENVIADA — análise]: ou [DOCUMENTO PDF]:. Trate esses prefixos com naturalidade — se a imagem revelar um PN, extraia esse PN e chame \`validate_part_number\`.
+
 A data atual é \${CURRENT_DATE}.`
