@@ -10,13 +10,13 @@ export function TagDistribution({ data }: { data: TagCount[] }) {
     <Card>
       <CardHeader><CardTitle>Distribuição por Tag</CardTitle></CardHeader>
       <CardContent>
-        <ChartContainer config={{ count: { label: 'Contatos', color: '#3b82f6' } }} className="h-[260px] w-full">
+        <ChartContainer config={{ count: { label: 'Contatos', color: 'hsl(var(--chart-1))' } }} className="h-[260px] w-full">
           <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="tag" tick={{ fontSize: 10 }} interval={0} angle={-30} textAnchor="end" height={70} />
-            <YAxis tick={{ fontSize: 11 }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
+            <XAxis dataKey="tag" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--border))" interval={0} angle={-30} textAnchor="end" height={70} />
+            <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--border))" />
             <ChartTooltip content={<ChartTooltipContent />} />
-            <Bar dataKey="count" fill="#3b82f6" radius={4} />
+            <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ChartContainer>
       </CardContent>
