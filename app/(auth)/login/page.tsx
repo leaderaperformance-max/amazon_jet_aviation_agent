@@ -6,7 +6,7 @@ import { getBrowserClient } from '@/lib/supabase/browser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -35,18 +35,21 @@ export default function LoginPage() {
 
   return (
     <Card>
-      <CardHeader><CardTitle>Login</CardTitle></CardHeader>
+      <CardHeader className="text-center">
+        <CardTitle className="text-xl">Entrar no painel</CardTitle>
+        <CardDescription>Acesse com sua conta de administrador</CardDescription>
+      </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
+          <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+            <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
           </div>
-          <div>
+          <div className="space-y-1.5">
             <Label htmlFor="password">Senha</Label>
             <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required />
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? 'Entrando...' : 'Entrar'}
           </Button>
