@@ -9,18 +9,22 @@ export async function runAgent(
   userMessage: string,
   systemPrompt: string,
   openaiApiKey: string,
-  openaiModel: string
+  openaiModel: string,
+  tools?: Record<string, unknown>
 ): Promise<string> {
   const history: MemoryMessage[] = await loadHistory(sessionId)
   const messages = [...history, { role: 'user' as const, content: userMessage }]
 
   const openai = createOpenAI({ apiKey: openaiApiKey })
 
-  const { text } = await generateText({
+  const generateParams: Parameters<typeof generateText>[0] = {
     model: openai(openaiModel),
     system: injectCurrentDate(systemPrompt),
     messages,
-  })
+  }
+  if (tools) (generateParams as { tools?: unknown }).tools = tools
+
+  const { text } = await generateText(generateParams)
 
   await saveMessage(sessionId, 'user', userMessage)
   await saveMessage(sessionId, 'assistant', text)
