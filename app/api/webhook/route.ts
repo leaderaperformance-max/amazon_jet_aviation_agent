@@ -179,7 +179,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     inbox.system_prompt,
     openai.apiKey,
     openai.model,
-    tools
+    tools,
+    labelsState
   )
 
   console.log(`[webhook] replyLen=${reply.length}`)
