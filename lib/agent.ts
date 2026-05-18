@@ -27,7 +27,17 @@ export async function runAgent(
   }
   if (tools) (generateParams as { tools?: unknown }).tools = tools
 
-  const { text } = await generateText(generateParams)
+  console.log(`[agent] runAgent toolsProvided=${!!tools} toolNames=${tools ? Object.keys(tools).join(',') : 'none'}`)
+
+  const result = await generateText(generateParams)
+  const { text } = result
+  const toolCalls = (result as { toolCalls?: unknown[] }).toolCalls ?? []
+  const steps = (result as { steps?: unknown[] }).steps ?? []
+
+  console.log(`[agent] toolCalls=${toolCalls.length} steps=${steps.length} textLen=${text.length}`)
+  if (toolCalls.length > 0) {
+    console.log(`[agent] toolCalls detail: ${JSON.stringify(toolCalls).slice(0, 500)}`)
+  }
 
   await saveMessage(sessionId, 'user', userMessage)
   await saveMessage(sessionId, 'assistant', text)
