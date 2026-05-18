@@ -57,14 +57,25 @@ export async function computeAnalytics(from: string, to: string): Promise<Analyt
   const prevFrom = new Date(fromDate.getTime() - delta).toISOString().slice(0, 10)
   const prevTo = from
 
+  // The `to` date is inclusive — Postgres treats '2026-05-18' as 00:00:00,
+  // which excludes anything created during that day. We extend the upper
+  // bound to the END of that day (next day at 00:00, exclusive).
+  function endOfDay(ymd: string): string {
+    const d = new Date(ymd + 'T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + 1)
+    return d.toISOString().slice(0, 10)
+  }
+  const toInclusive = endOfDay(to)
+  const prevToInclusive = endOfDay(prevTo)
+
   // Fetch all data in parallel
   const [contactsRes, messagesRes, inboxesRes, activeRes, prevContactsRes, prevMessagesRes] = await Promise.all([
-    supabase.from('contacts').select('*').gte('first_seen_at', from).lte('first_seen_at', to),
-    supabase.from('memory_chat_amazon_jet').select('session_id, created_at, message').gte('created_at', from).lte('created_at', to).order('created_at', { ascending: true }),
+    supabase.from('contacts').select('*').gte('first_seen_at', from).lt('first_seen_at', toInclusive),
+    supabase.from('memory_chat_amazon_jet').select('session_id, created_at, message').gte('created_at', from).lt('created_at', toInclusive).order('created_at', { ascending: true }),
     supabase.from('inboxes').select('id, name'),
     supabase.from('contacts').select('id').in('status', ['ia', 'humano']),
-    supabase.from('contacts').select('id, current_labels').gte('first_seen_at', prevFrom).lte('first_seen_at', prevTo),
-    supabase.from('memory_chat_amazon_jet').select('message').gte('created_at', prevFrom).lte('created_at', prevTo),
+    supabase.from('contacts').select('id, current_labels').gte('first_seen_at', prevFrom).lt('first_seen_at', prevToInclusive),
+    supabase.from('memory_chat_amazon_jet').select('message').gte('created_at', prevFrom).lt('created_at', prevToInclusive),
   ])
 
   const contacts: ContactRow[] = (contactsRes.data ?? []) as ContactRow[]

@@ -13,7 +13,7 @@ const mockGetAdminClient = getAdminClient as ReturnType<typeof vi.fn>
 function makeQueryBuilder(data: unknown[]) {
   const builder: Record<string, unknown> = {}
   // every chain method returns the same builder
-  const methods = ['select', 'eq', 'gte', 'lte', 'order', 'limit', 'in', 'contains', 'not', 'or', 'overlaps']
+  const methods = ['select', 'eq', 'gte', 'lte', 'lt', 'gt', 'order', 'limit', 'in', 'contains', 'not', 'or', 'overlaps']
   for (const m of methods) {
     builder[m] = vi.fn().mockReturnValue(builder)
   }

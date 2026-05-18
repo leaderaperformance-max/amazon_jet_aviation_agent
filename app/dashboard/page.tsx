@@ -10,11 +10,18 @@ import { InboxDistribution } from '@/components/analytics/inbox-distribution'
 import { TopContactsTable } from '@/components/analytics/top-contacts'
 import { InboxStatusList } from '@/components/analytics/inbox-status'
 
+function toLocalYMD(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function defaultRange(): { from: string; to: string } {
   const to = new Date()
   const from = new Date()
   from.setDate(from.getDate() - 30)
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+  return { from: toLocalYMD(from), to: toLocalYMD(to) }
 }
 
 export default async function DashboardPage({
