@@ -5,11 +5,21 @@ vi.mock('unpdf', () => ({
   extractText: vi.fn(),
 }))
 
+vi.mock('ai', () => ({ generateText: vi.fn() }))
+vi.mock('@ai-sdk/openai', () => ({
+  createOpenAI: vi.fn(() => (_model: string) => `mocked-model`),
+}))
+vi.mock('@/lib/inboxes', () => ({
+  loadOpenAIConfig: vi.fn().mockResolvedValue({ apiKey: 'sk-test', model: 'gpt-4o' }),
+}))
+
 import { extractPdfText } from '@/lib/media/pdf'
 import { getDocumentProxy, extractText } from 'unpdf'
+import { generateText } from 'ai'
 
 const mockGetDoc = getDocumentProxy as unknown as ReturnType<typeof vi.fn>
 const mockExtract = extractText as unknown as ReturnType<typeof vi.fn>
+const mockGenerate = generateText as ReturnType<typeof vi.fn>
 
 describe('extractPdfText', () => {
   beforeEach(() => {
@@ -37,8 +47,23 @@ describe('extractPdfText', () => {
     expect(result.text.length).toBe(8000)
   })
 
-  it('lança erro se texto extraído < 50 chars (PDF escaneado)', async () => {
+  it('PDF escaneado (texto vazio) usa fallback GPT-4o vision', async () => {
     mockExtract.mockResolvedValue({ text: '  ', totalPages: 1 })
-    await expect(extractPdfText(Buffer.from([0x25]))).rejects.toThrow('PDF parece escaneado')
+    mockGenerate.mockResolvedValue({ text: 'PN: MS21266-2N Qtd: 2\nTipo: IPC\nCliente: Operador XYZ' })
+
+    const result = await extractPdfText(Buffer.from([0x25]))
+    expect(mockGenerate).toHaveBeenCalledOnce()
+    expect(result.text).toContain('MS21266-2N')
+    expect(result.numPages).toBe(1)
+  })
+
+  it('unpdf falha completamente → usa fallback GPT-4o vision', async () => {
+    mockGetDoc.mockRejectedValue(new Error('invalid pdf'))
+    mockGenerate.mockResolvedValue({ text: 'Documento ilegível' })
+
+    const result = await extractPdfText(Buffer.from([0x00]))
+    expect(mockGenerate).toHaveBeenCalledOnce()
+    expect(result.text).toContain('ilegível')
+    expect(result.numPages).toBe(1)
   })
 })
