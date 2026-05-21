@@ -245,7 +245,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     validate_part_number: tool({
       description: 'Valida se o texto é um Part Number aeronáutico legítimo. ' +
                    'Cobre MIL-SPEC (AN/MS/NAS/M-series), NSN, ATA e fabricantes ' +
-                   '(Cessna, Garmin, Beechcraft, Piper, Honeywell, etc.). ' +
+                   '(Cessna, Garmin, Beechcraft, Piper, Honeywell, headsets Bose/Lightspeed/David Clark, etc.). ' +
                    'Retorna formato, fabricante, confidence e PN normalizado.',
       inputSchema: z.object({
         candidate: z.string().describe('O texto fornecido pelo cliente, possível PN'),
@@ -256,47 +256,86 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return result
       },
     }),
-    envia_pn: tool({
-      description: 'Envia lead qualificado (PN validado + quantidade + urgência) ao vendedor humano via WhatsApp. CHAME apenas quando tiver TODOS os dados qualificados. Nome e telefone do cliente vêm automaticamente do contato — você NÃO precisa passar.',
+    extract_part_numbers: tool({
+      description: 'Extrai TODOS os Part Numbers candidatos de um texto/lista/documento. Use quando o cliente enviar conteúdo com possivelmente múltiplos PNs (planilhas, PDFs com listas, mensagens longas).',
       inputSchema: z.object({
-        part_number: z.string(),
-        quantity: z.string(),
+        text: z.string().describe('O texto a analisar'),
+      }),
+      execute: async ({ text }: { text: string }) => {
+        const cfg = await loadOpenAIConfig()
+        const { createOpenAI } = await import('@ai-sdk/openai')
+        const { generateText } = await import('ai')
+        const openai = createOpenAI({ apiKey: cfg.apiKey })
+
+        const { text: jsonText } = await generateText({
+          model: openai('gpt-4o'),
+          system: 'Você é um extrator de Part Numbers aeronáuticos. Dado um texto, extraia TODOS os PNs candidatos com suas quantidades se houver. Aceite formatos: MIL-SPEC, Garmin, Bose, Lightspeed, David Clark, etc. Responda APENAS JSON: {"items": [{"candidate": "MS21266-2N", "quantity": "2", "context": "linha 3 da planilha"}]}. Se não houver PNs, retorne {"items": []}.',
+          prompt: text,
+        })
+
+        try {
+          const cleaned = jsonText.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+          const parsed = JSON.parse(cleaned) as { items: Array<{ candidate: string; quantity?: string; context?: string }> }
+          console.log(`[extract_pn] found ${parsed.items?.length ?? 0} candidates`)
+          return parsed
+        } catch (err) {
+          console.warn('[extract_pn] parse failed:', err)
+          return { items: [] }
+        }
+      },
+    }),
+    envia_pn: tool({
+      description: 'Envia lead qualificado ao vendedor humano. Aceita 1+ items (Part Number + quantidade). CHAME quando tiver todos os dados.',
+      inputSchema: z.object({
+        items: z.array(z.object({
+          part_number: z.string(),
+          quantity: z.string(),
+          notes: z.string().optional(),
+        })).min(1),
         urgency: z.enum(['AOG', 'rotina']),
-        notes: z.string().optional(),
+        general_notes: z.string().optional(),
       }),
       execute: async (args) => {
-        // Customer name/phone vêm SEMPRE do payload Chatwoot (closure), nunca do LLM
         const finalName = (senderName && senderName.trim()) || null
         const finalPhone = (senderPhone && senderPhone.trim()) || null
 
-        console.log(`[envia_pn] firing PN=${args.part_number} qty=${args.quantity} urg=${args.urgency} name=${finalName} phone=${finalPhone}`)
+        console.log(`[envia_pn] firing with ${args.items.length} item(s) urg=${args.urgency} name=${finalName}`)
 
-        // 1. Save lead
-        const lead = await createLead({
-          contact_id: contact.id,
-          part_number: args.part_number,
-          quantity: args.quantity,
-          urgency: args.urgency,
-          customer_name: finalName,
-          customer_phone: finalPhone,
-          notes: args.notes ?? null,
-        })
+        // 1. Save each item as a separate lead row
+        const leadIds: string[] = []
+        for (const item of args.items) {
+          const lead = await createLead({
+            contact_id: contact.id,
+            part_number: item.part_number,
+            quantity: item.quantity,
+            urgency: args.urgency,
+            customer_name: finalName,
+            customer_phone: finalPhone,
+            notes: item.notes ?? args.general_notes ?? null,
+          })
+          leadIds.push(lead.id)
+        }
 
-        // 2. Send WhatsApp to seller (if configured)
+        // 2. Send WhatsApp to seller
         const sellerPhone = (inbox as unknown as { seller_phone?: string | null }).seller_phone
         if (sellerPhone && inbox.quepasa_host && inbox.quepasa_token) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
           const urgencyEmoji = args.urgency === 'AOG' ? '🔴' : '🟡'
+
+          const itemsBlock = args.items.length === 1
+            ? `🔧 *Part Number:* ${args.items[0].part_number}\n🔢 *Quantidade:* ${args.items[0].quantity}${args.items[0].notes ? `\n📝 ${args.items[0].notes}` : ''}`
+            : `📋 *ITENS (${args.items.length}):*\n` + args.items.map((it, i) => `  ${i + 1}. ${it.part_number} — Qtd: ${it.quantity}${it.notes ? ` (${it.notes})` : ''}`).join('\n')
+
           const sellerMsg = [
             '🆕 *NOVO LEAD QUALIFICADO*',
             '',
             `👤 *Cliente:* ${finalName ?? '(sem nome)'}`,
             `📱 *WhatsApp:* ${finalPhone ?? '(não informado)'}`,
-            `🔧 *Part Number:* ${args.part_number}`,
-            `🔢 *Quantidade:* ${args.quantity}`,
             `⚡ *Urgência:* ${args.urgency} ${urgencyEmoji}`,
             '',
-            args.notes ? `📝 _${args.notes}_` : null,
+            itemsBlock,
+            '',
+            args.general_notes ? `📝 _${args.general_notes}_` : null,
             '',
             '🔗 Atender em:',
             chatwootUrl,
@@ -315,7 +354,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
         await updateContactLabels(contact.id, labelsState)
 
-        return { ok: true, lead_id: lead.id }
+        return { ok: true, lead_ids: leadIds, count: args.items.length }
       },
     }),
   }
