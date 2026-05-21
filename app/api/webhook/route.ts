@@ -10,7 +10,7 @@ import { addLabel, removeLabel } from '@/lib/tags'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
-import { validatePartNumber } from '@/lib/part-number'
+import { validatePartNumber, extractPartNumbersFromText } from '@/lib/part-number'
 import { insertPending, hasNewerPending, drainPending } from '@/lib/debounce'
 import { createLead } from '@/lib/leads'
 
@@ -257,31 +257,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     }),
     extract_part_numbers: tool({
-      description: 'Extrai TODOS os Part Numbers candidatos de um texto/lista/documento. Use quando o cliente enviar conteúdo com possivelmente múltiplos PNs (planilhas, PDFs com listas, mensagens longas).',
+      description: 'Extrai uma lista de Part Numbers candidatos de um blob de texto (útil quando cliente manda planilha, PDF ou lista com múltiplos PNs). Retorna array de candidatos com contexto e quantidade se identificável.',
       inputSchema: z.object({
-        text: z.string().describe('O texto a analisar'),
+        text: z.string().describe('O texto completo de onde extrair PNs (ex: conteúdo de planilha ou PDF)'),
       }),
       execute: async ({ text }: { text: string }) => {
-        const cfg = await loadOpenAIConfig()
-        const { createOpenAI } = await import('@ai-sdk/openai')
-        const { generateText } = await import('ai')
-        const openai = createOpenAI({ apiKey: cfg.apiKey })
-
-        const { text: jsonText } = await generateText({
-          model: openai('gpt-4o'),
-          system: 'Você é um extrator de Part Numbers aeronáuticos. Dado um texto, extraia TODOS os PNs candidatos com suas quantidades se houver. Aceite formatos: MIL-SPEC, Garmin, Bose, Lightspeed, David Clark, etc. Responda APENAS JSON: {"items": [{"candidate": "MS21266-2N", "quantity": "2", "context": "linha 3 da planilha"}]}. Se não houver PNs, retorne {"items": []}.',
-          prompt: text,
-        })
-
-        try {
-          const cleaned = jsonText.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
-          const parsed = JSON.parse(cleaned) as { items: Array<{ candidate: string; quantity?: string; context?: string }> }
-          console.log(`[extract_pn] found ${parsed.items?.length ?? 0} candidates`)
-          return parsed
-        } catch (err) {
-          console.warn('[extract_pn] parse failed:', err)
-          return { items: [] }
-        }
+        const result = await extractPartNumbersFromText(text)
+        console.log(`[extract_pn] found ${result.length} candidates`)
+        return { items: result }
       },
     }),
     envia_pn: tool({

@@ -35,6 +35,7 @@ vi.mock('@/lib/media/process', () => ({
 }))
 vi.mock('@/lib/part-number', () => ({
   validatePartNumber: vi.fn(),
+  extractPartNumbersFromText: vi.fn().mockResolvedValue([]),
 }))
 // Track inserted content so drainPending can return the same combined content
 let lastInsertedContent = 'oi'

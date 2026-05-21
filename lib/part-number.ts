@@ -82,15 +82,25 @@ Responda APENAS JSON, sem markdown:
   "reason": string
 }
 
-REGRAS DE DECISÃO:
+CRITÉRIOS DE ACEITAÇÃO:
+- PNs formais (MS, AN, NAS): valid=true high
+- Produtos aviation comerciais (headsets Bose A30, Lightspeed Zulu 3, GPS Garmin GTN750, etc.): valid=true medium
+- Modelos abreviados que claramente identificam produto (A30, A20, Zulu 3): valid=true medium
+- Marca + modelo aviation: valid=true medium
+- Texto genérico ("olá", "preciso", "uma peça"): valid=false
+- Algo ambíguo mas com dígitos: valid=true low (deixe humano decidir)
+
+SEMPRE aceite produtos de fabricantes aviation conhecidos como PN válido.
+
+EXEMPLOS:
 - "preciso de uma peça" → invalid (texto genérico, sem produto)
 - "olá" → invalid
-- "Bose A30" → valid, high, Bose Headset
-- "Lightspeed Zulu 3" → valid, high, Lightspeed Headset
+- "Bose A30" → valid, medium, Bose Headset
+- "Lightspeed Zulu 3" → valid, medium, Lightspeed Headset
 - "MS21266-2N" → valid, high, MIL-SPEC MS
-- "GTN 750" → valid, high, Garmin Avionics
+- "GTN 750" → valid, medium, Garmin Avionics
 - "headset" sozinho → invalid (falta marca/modelo)
-- "ABC123" → valid, medium, Generic alphanumeric
+- "ABC123" → valid, low, Generic alphanumeric
 - "857641-0010" → valid, high, Bose Headset
 - normalized: uppercase, trim, espaços/hífens normalizados
 
@@ -155,5 +165,49 @@ export async function validatePartNumber(candidate: string): Promise<ValidationR
       confidence: 'low', normalized,
       reason: 'Falha ao validar via LLM',
     }
+  }
+}
+
+export interface ExtractedItem {
+  candidate: string
+  context: string
+  quantity?: string
+}
+
+const EXTRACT_PROMPT = `Você é um especialista em peças aeronáuticas. Leia o texto e EXTRAIA todos os Part Numbers ou referências de produtos aeronáuticos mencionados.
+
+Considere PN aeronáutico:
+- MIL-SPEC (AN, MS, NAS, M-series)
+- NSN (4-2-3-4 dígitos)
+- Garmin, Cessna, Beechcraft, Piper, Embraer, Honeywell, Collins, P&W, Lycoming
+- Headsets aviation (Bose A20/A30, Lightspeed Zulu/Sierra, David Clark H10)
+- Modelos comerciais aviation reconhecíveis
+
+Responda APENAS JSON:
+{"items": [{"candidate": "MS21266-2N", "context": "linha 3 da planilha", "quantity": "2 unidades"}, ...]}
+
+REGRAS:
+- Inclua quantidade SE estiver explicitamente associada (ex: "MS21266-2N qty 2", "qtd 5", coluna "qtd")
+- Inclua context curto (qual linha, qual seção)
+- Se nenhum PN encontrado: {"items": []}
+- NÃO invente PNs que não estão no texto`
+
+export async function extractPartNumbersFromText(text: string): Promise<ExtractedItem[]> {
+  if (!text || text.trim().length < 5) return []
+
+  try {
+    const cfg = await loadOpenAIConfig()
+    const openai = createOpenAI({ apiKey: cfg.apiKey })
+    const { text: response } = await generateText({
+      model: openai('gpt-4o'),
+      system: EXTRACT_PROMPT,
+      prompt: text,
+    })
+    const cleaned = response.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+    const parsed = JSON.parse(cleaned) as { items?: ExtractedItem[] }
+    return parsed.items ?? []
+  } catch (err) {
+    console.warn('[extract_part_numbers] error:', err)
+    return []
   }
 }
