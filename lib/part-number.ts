@@ -150,7 +150,7 @@ export async function validatePartNumber(candidate: string): Promise<ValidationR
     // Strip code fences if model adds them
     const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
     const parsed = JSON.parse(cleaned) as Partial<ValidationResult>
-    return {
+    const llmResult: ValidationResult = {
       valid: Boolean(parsed.valid),
       format: parsed.format ?? 'Other',
       manufacturer: parsed.manufacturer ?? null,
@@ -158,6 +158,35 @@ export async function validatePartNumber(candidate: string): Promise<ValidationR
       normalized: parsed.normalized ?? normalized,
       reason: parsed.reason ?? 'LLM validation',
     }
+
+    // Step 4: For medium/low confidence cases, verify online via OpenAI web search.
+    // Internal only — we never expose sources to the customer.
+    if (llmResult.confidence !== 'high') {
+      try {
+        const web = await verifyPartNumberOnline(normalized)
+        console.log(`[part-number] web_verify "${normalized}" → confirmed=${web.confirmed} (${web.details?.slice(0, 120) ?? ''})`)
+        if (web.confirmed) {
+          return {
+            ...llmResult,
+            valid: true,
+            confidence: 'high',
+            reason: `${llmResult.reason} + confirmado via web search`,
+          }
+        }
+        if (web.rejected) {
+          return {
+            ...llmResult,
+            valid: false,
+            confidence: 'high',
+            reason: `Web search não encontrou produto aeronáutico para "${normalized}"`,
+          }
+        }
+      } catch (e) {
+        console.warn('[part-number] web verify failed:', e)
+      }
+    }
+
+    return llmResult
   } catch (err) {
     console.warn('[part-number] LLM validation failed:', err)
     return {
@@ -165,6 +194,81 @@ export async function validatePartNumber(candidate: string): Promise<ValidationR
       confidence: 'low', normalized,
       reason: 'Falha ao validar via LLM',
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Web search verification (OpenAI Responses API + web_search_preview tool)
+// Used internally to upgrade LLM-ambiguous PNs. Sources are NEVER exposed
+// to the customer — only confirmed/rejected boolean drives validatePartNumber.
+// ---------------------------------------------------------------------------
+
+export interface WebVerifyResult {
+  confirmed: boolean
+  rejected: boolean
+  details?: string
+}
+
+export async function verifyPartNumberOnline(candidate: string): Promise<WebVerifyResult> {
+  const cfg = await loadOpenAIConfig()
+  const prompt = `Pesquise se "${candidate}" é um Part Number, modelo ou produto aeronáutico/aviônico/aviation real que existe no mercado (peças de aeronave, aviônicos, headsets aviation, instrumentos, motores aeronáuticos, etc.).
+
+Considere fabricantes aviation: Garmin, Bose Aviation, Lightspeed, David Clark, Honeywell, Bendix/King, Collins, Avidyne, Aspen, Cessna, Piper, Beechcraft, Embraer, Pratt & Whitney, Lycoming, Continental, Rolls-Royce, e fornecedores como Aircraft Spruce, Pilot Mall, etc.
+
+Responda APENAS um JSON, sem markdown:
+{"confirmed": boolean, "details": "1 frase curta sobre o que achou"}
+
+- confirmed=true: encontrou listings/menções reais como produto aeronáutico
+- confirmed=false: não é aviation ou nada encontrado`
+
+  const resp = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      tools: [{ type: 'web_search_preview' }],
+      input: prompt,
+    }),
+  })
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '')
+    throw new Error(`Responses API ${resp.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const data = await resp.json() as {
+    output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>
+    output_text?: string
+  }
+
+  // Extract assistant text. output_text is the convenience field; fall back to scanning output[].
+  let text = data.output_text ?? ''
+  if (!text && data.output) {
+    for (const item of data.output) {
+      if (item.type === 'message' && item.content) {
+        for (const c of item.content) {
+          if (c.type === 'output_text' && c.text) text += c.text
+        }
+      }
+    }
+  }
+
+  // Parse JSON (strip code fences if present)
+  const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+  try {
+    const parsed = JSON.parse(cleaned) as { confirmed?: boolean; details?: string }
+    const confirmed = parsed.confirmed === true
+    return {
+      confirmed,
+      rejected: parsed.confirmed === false,
+      details: parsed.details,
+    }
+  } catch {
+    // If JSON parse fails, be conservative: neither confirm nor reject.
+    return { confirmed: false, rejected: false, details: text.slice(0, 200) }
   }
 }
 
