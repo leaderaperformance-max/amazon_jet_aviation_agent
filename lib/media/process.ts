@@ -29,6 +29,15 @@ function isPdf(att: ChatwootAttachment): boolean {
   return false
 }
 
+function isSpreadsheet(att: ChatwootAttachment): boolean {
+  if (att.content_type === 'text/csv') return true
+  if (att.content_type?.includes('spreadsheet')) return true  // xlsx
+  if (att.content_type?.includes('excel')) return true  // xls
+  const ext = att.extension?.toLowerCase()
+  if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') return true
+  return false
+}
+
 function filename(att: ChatwootAttachment): string {
   if (!att.data_url) return 'arquivo'
   try {
@@ -54,6 +63,13 @@ export async function processAttachment(att: ChatwootAttachment): Promise<string
       const buf = await downloadAttachment(att.data_url)
       const analysis = await analyzeImage(buf, att.content_type ?? 'image/jpeg')
       return `[IMAGEM ENVIADA — análise]: ${analysis}`
+    }
+
+    if (isSpreadsheet(att)) {
+      const buf = await downloadAttachment(att.data_url)
+      const { extractSpreadsheetText } = await import('@/lib/media/spreadsheet')
+      const { text, sheetsCount } = extractSpreadsheetText(buf)
+      return `[PLANILHA — ${filename(att)}, ${sheetsCount} sheet(s)]: ${text}`
     }
 
     if (isPdf(att)) {

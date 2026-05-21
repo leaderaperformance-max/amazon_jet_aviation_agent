@@ -4,17 +4,20 @@ vi.mock('@/lib/media/download', () => ({ downloadAttachment: vi.fn() }))
 vi.mock('@/lib/media/transcribe', () => ({ transcribeAudio: vi.fn() }))
 vi.mock('@/lib/media/vision', () => ({ analyzeImage: vi.fn() }))
 vi.mock('@/lib/media/pdf', () => ({ extractPdfText: vi.fn() }))
+vi.mock('@/lib/media/spreadsheet', () => ({ extractSpreadsheetText: vi.fn() }))
 
 import { processAttachment } from '@/lib/media/process'
 import { downloadAttachment } from '@/lib/media/download'
 import { transcribeAudio } from '@/lib/media/transcribe'
 import { analyzeImage } from '@/lib/media/vision'
 import { extractPdfText } from '@/lib/media/pdf'
+import { extractSpreadsheetText } from '@/lib/media/spreadsheet'
 
 const mockDownload = downloadAttachment as ReturnType<typeof vi.fn>
 const mockTranscribe = transcribeAudio as ReturnType<typeof vi.fn>
 const mockAnalyze = analyzeImage as ReturnType<typeof vi.fn>
 const mockExtract = extractPdfText as ReturnType<typeof vi.fn>
+const mockExtractSheet = extractSpreadsheetText as ReturnType<typeof vi.fn>
 
 describe('processAttachment', () => {
   beforeEach(() => {
@@ -55,10 +58,23 @@ describe('processAttachment', () => {
     expect(result).toContain('spec da peça')
   })
 
-  it('retorna null pra tipo não suportado', async () => {
+  it('processa XLSX e retorna [PLANILHA]:', async () => {
+    mockExtractSheet.mockReturnValue({ text: 'MS21266-2N | 2 | NEW', sheetsCount: 1 })
     const result = await processAttachment({
       data_url: 'https://x.com/sheet.xlsx',
       content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      file_type: 'file',
+      extension: 'xlsx',
+    })
+    expect(result).toContain('[PLANILHA')
+    expect(result).toContain('MS21266-2N')
+    expect(result).toContain('1 sheet(s)')
+  })
+
+  it('retorna null pra tipo verdadeiramente não suportado', async () => {
+    const result = await processAttachment({
+      data_url: 'https://x.com/video.mp4',
+      content_type: 'video/mp4',
       file_type: 'file',
     })
     expect(result).toBeNull()
