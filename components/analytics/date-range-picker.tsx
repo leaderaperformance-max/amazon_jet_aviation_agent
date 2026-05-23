@@ -1,11 +1,7 @@
 'use client'
 
-import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import type { DateRange } from 'react-day-picker'
 
 function toYMD(d: Date): string {
   // Use local date to avoid UTC offset bugs (Brasília is UTC-3).
@@ -13,10 +9,6 @@ function toYMD(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-function formatBR(d: Date): string {
-  return d.toLocaleDateString('pt-BR')
 }
 
 interface Props {
@@ -27,11 +19,13 @@ interface Props {
 export function DateRangePicker({ initialFrom, initialTo }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [open, setOpen] = useState(false)
-  const [range, setRange] = useState<DateRange | undefined>({
-    from: new Date(initialFrom),
-    to: new Date(initialTo),
-  })
+
+  function pushRange(from: string, to: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('from', from)
+    params.set('to', to)
+    router.push(`/dashboard?${params.toString()}`)
+  }
 
   function applyPreset(daysBack: number | 'all') {
     const to = new Date()
@@ -45,41 +39,33 @@ export function DateRangePicker({ initialFrom, initialTo }: Props) {
       from = new Date()
       from.setDate(from.getDate() - daysBack)
     }
-    pushRange(from, to)
+    pushRange(toYMD(from), toYMD(to))
   }
-
-  function pushRange(from: Date, to: Date) {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('from', toYMD(from))
-    params.set('to', toYMD(to))
-    router.push(`/dashboard?${params.toString()}`)
-    setOpen(false)
-  }
-
-  function applyCustom() {
-    if (range?.from && range?.to) pushRange(range.from, range.to)
-  }
-
-  const label = range?.from && range?.to
-    ? `${formatBR(range.from)} — ${formatBR(range.to)}`
-    : 'Selecionar período'
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button variant="outline">{label}</Button>} />
-      <PopoverContent className="w-auto p-3" align="end">
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => applyPreset(0)}>Hoje</Button>
-            <Button size="sm" variant="outline" onClick={() => applyPreset(7)}>7d</Button>
-            <Button size="sm" variant="outline" onClick={() => applyPreset(30)}>30d</Button>
-            <Button size="sm" variant="outline" onClick={() => applyPreset(90)}>90d</Button>
-            <Button size="sm" variant="outline" onClick={() => applyPreset('all')}>Tudo</Button>
-          </div>
-          <Calendar mode="range" selected={range} onSelect={setRange} numberOfMonths={2} />
-          <Button onClick={applyCustom} disabled={!range?.from || !range?.to}>Aplicar</Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        type="date"
+        value={initialFrom}
+        onChange={e => pushRange(e.target.value, initialTo)}
+        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        title="Data inicial"
+      />
+      <span className="text-muted-foreground">—</span>
+      <input
+        type="date"
+        value={initialTo}
+        onChange={e => pushRange(initialFrom, e.target.value)}
+        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        title="Data final"
+      />
+      <div className="flex gap-1 ml-2">
+        <Button size="sm" variant="outline" onClick={() => applyPreset(0)}>Hoje</Button>
+        <Button size="sm" variant="outline" onClick={() => applyPreset(7)}>7d</Button>
+        <Button size="sm" variant="outline" onClick={() => applyPreset(30)}>30d</Button>
+        <Button size="sm" variant="outline" onClick={() => applyPreset(90)}>90d</Button>
+        <Button size="sm" variant="outline" onClick={() => applyPreset('all')}>Tudo</Button>
+      </div>
+    </div>
   )
 }
