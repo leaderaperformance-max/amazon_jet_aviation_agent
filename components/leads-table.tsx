@@ -61,8 +61,10 @@ function timeAgo(isoString: string): string {
 
 export function LeadsTable({ initialLeads }: LeadsTableProps) {
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
-  const [statusFilter, setStatusFilter] = useState<string>('pendente')
+  const [statusFilter, setStatusFilter] = useState<string>('todos')
   const [urgencyFilter, setUrgencyFilter] = useState<string>('todas')
+  const [fromDate, setFromDate] = useState<string>('')
+  const [toDate, setToDate] = useState<string>('')
   const [loading, setLoading] = useState<string | null>(null)
 
   async function fetchLeads(status: string, urgency: string) {
@@ -104,9 +106,30 @@ export function LeadsTable({ initialLeads }: LeadsTableProps) {
     }
   }
 
+  async function resendLead(id: string) {
+    setLoading(id)
+    try {
+      const res = await fetch(`/api/leads/${id}/resend`, { method: 'POST' })
+      if (res.ok) {
+        alert('Lead reenviado pro vendedor.')
+      } else {
+        const { error } = await res.json().catch(() => ({ error: 'erro desconhecido' }))
+        alert(`Falha ao reenviar: ${error}`)
+      }
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const filtered = leads.filter(l => {
     if (statusFilter !== 'todos' && l.status !== statusFilter) return false
     if (urgencyFilter !== 'todas' && l.urgency !== urgencyFilter) return false
+    if (fromDate && l.sent_to_seller_at < fromDate) return false
+    if (toDate) {
+      // inclusive end-of-day
+      const end = new Date(toDate + 'T23:59:59.999Z').toISOString()
+      if (l.sent_to_seller_at > end) return false
+    }
     return true
   })
 
@@ -139,7 +162,43 @@ export function LeadsTable({ initialLeads }: LeadsTableProps) {
             </SelectContent>
           </Select>
         </div>
+        <input
+          type="date"
+          value={fromDate}
+          onChange={e => setFromDate(e.target.value)}
+          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          placeholder="De"
+          title="Data inicial"
+        />
+        <input
+          type="date"
+          value={toDate}
+          onChange={e => setToDate(e.target.value)}
+          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          placeholder="Até"
+          title="Data final"
+        />
+        {(fromDate || toDate) && (
+          <Button size="sm" variant="ghost" onClick={() => { setFromDate(''); setToDate('') }}>
+            Limpar
+          </Button>
+        )}
         <span className="text-sm text-muted-foreground">{filtered.length} lead(s)</span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={() => {
+            const params = new URLSearchParams()
+            if (statusFilter !== 'todos') params.set('status', statusFilter)
+            if (urgencyFilter !== 'todas') params.set('urgency', urgencyFilter)
+            if (fromDate) params.set('from', fromDate)
+            if (toDate) params.set('to', toDate)
+            window.location.href = `/api/leads/export?${params.toString()}`
+          }}
+        >
+          ⬇️ Exportar CSV
+        </Button>
       </div>
 
       <div className="rounded-md border">
@@ -227,6 +286,15 @@ export function LeadsTable({ initialLeads }: LeadsTableProps) {
                         Perdido
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={loading === lead.id}
+                      onClick={() => resendLead(lead.id)}
+                      title="Reenviar notificação ao vendedor"
+                    >
+                      🔁
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>

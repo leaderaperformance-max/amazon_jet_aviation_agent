@@ -7,10 +7,10 @@ export default async function LeadsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // Load all leads — the LeadsTable lets the user filter by status client-side.
   const { data: leads } = await supabase
     .from('leads')
     .select('*, contacts(name, phone_number, whatsapp_identifier, inbox_id)')
-    .eq('status', 'pendente')
     .order('urgency', { ascending: true })
     .order('sent_to_seller_at', { ascending: false })
 
