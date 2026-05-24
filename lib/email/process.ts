@@ -14,6 +14,13 @@ export interface ProcessResult {
   errors: string[]
 }
 
+/**
+ * Categorias que disparam notificação no WhatsApp. Os outros emails
+ * (dúvida técnica, spam, interno, etc) continuam sendo salvos no DB
+ * e aparecem no /dashboard/email, mas não interrompem o vendedor.
+ */
+const NOTIFY_CATEGORIES = new Set(['cotacao', 'rfq', 'ordem_compra', 'follow_up'])
+
 interface InboxNotifyCfg {
   quepasa_host: string
   quepasa_token: string
@@ -138,9 +145,11 @@ export async function processOneMessage(
   })
   if (insertErr) throw new Error(`insert: ${insertErr.message}`)
 
-  // Skip WhatsApp notification for spam
-  if (summary.category === 'spam') {
+  // Only notify sales-relevant categories on WhatsApp. Everything else is
+  // still saved to the dashboard but doesn't ping the seller.
+  if (!NOTIFY_CATEGORIES.has(summary.category)) {
     await markAsRead(account, messageId).catch(() => {})
+    console.log(`[email/process] ${email.messageId} category=${summary.category} → no whatsapp notify`)
     return { skipped: false }
   }
 
