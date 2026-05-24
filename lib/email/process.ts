@@ -171,7 +171,7 @@ export async function processOneMessage(
   return { skipped: false }
 }
 
-export async function processAccount(account: EmailAccountRow, maxPerPoll = 10): Promise<ProcessResult> {
+export async function processAccount(account: EmailAccountRow, maxPerPoll = 5): Promise<ProcessResult> {
   const result: ProcessResult = { account_id: account.id, fetched: 0, processed: 0, skipped: 0, errors: [] }
   const notifyCfg = await loadNotifyConfig()
 
