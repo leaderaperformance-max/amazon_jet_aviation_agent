@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { processAccount, ProcessResult } from '@/lib/email/process'
+import { processAccount } from '@/lib/email/process'
 import type { EmailAccountRow } from '@/lib/google/gmail'
 
 /**
@@ -38,25 +39,21 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const results: ProcessResult[] = []
-  for (const acc of (accounts ?? []) as EmailAccountRow[]) {
-    try {
-      const r = await processAccount(acc)
-      results.push(r)
-      console.log(`[email/poll] ${acc.email_address}: fetched=${r.fetched} processed=${r.processed} skipped=${r.skipped} errors=${r.errors.length}`)
-    } catch (err) {
-      results.push({
-        account_id: acc.id,
-        fetched: 0, processed: 0, skipped: 0,
-        errors: [(err as Error).message],
-      })
-    }
-  }
+  const accs = (accounts ?? []) as EmailAccountRow[]
 
-  return NextResponse.json({
-    accounts: results.length,
-    total_fetched: results.reduce((s, r) => s + r.fetched, 0),
-    total_processed: results.reduce((s, r) => s + r.processed, 0),
-    results,
-  })
+  // Fire-and-forget processing — we return 200 immediately so cron-job.org's
+  // 30s timeout never fires. Vercel keeps the function alive for up to
+  // `maxDuration` (60s) to finish the work via `waitUntil()`.
+  waitUntil((async () => {
+    for (const acc of accs) {
+      try {
+        const r = await processAccount(acc)
+        console.log(`[email/poll] ${acc.email_address}: fetched=${r.fetched} processed=${r.processed} skipped=${r.skipped} errors=${r.errors.length}${r.errors.length ? ' details=' + JSON.stringify(r.errors) : ''}`)
+      } catch (err) {
+        console.warn(`[email/poll] account ${acc.id} failed:`, err)
+      }
+    }
+  })())
+
+  return NextResponse.json({ ok: true, accounts_queued: accs.length })
 }
