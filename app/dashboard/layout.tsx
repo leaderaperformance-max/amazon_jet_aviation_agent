@@ -28,6 +28,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <Link href="/dashboard/leads" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
                 Leads
               </Link>
+              <Link href="/dashboard/email" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
+                Email
+              </Link>
               <Link href="/dashboard/settings/openai" className="px-3 py-1.5 rounded-md hover:bg-surface-2 transition-colors">
                 OpenAI
               </Link>
