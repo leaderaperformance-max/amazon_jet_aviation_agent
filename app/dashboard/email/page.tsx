@@ -69,7 +69,7 @@ export default async function EmailDashboard({
           </a>
         </div>
         {accounts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma conta conectada ainda. Clica em "Conectar Gmail" pra começar.</p>
+          <p className="text-sm text-muted-foreground">Nenhuma conta conectada ainda. Clica em &quot;Conectar Gmail&quot; pra começar.</p>
         ) : (
           <div className="rounded-md border">
             <Table>
