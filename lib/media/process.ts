@@ -93,3 +93,52 @@ export async function processAttachment(att: ChatwootAttachment): Promise<string
     return null
   }
 }
+
+/**
+ * Process an attachment we already have as a Buffer (e.g. fetched from Gmail).
+ * Same logic as processAttachment but skips the download step.
+ */
+export async function processBuffer(
+  buf: Buffer,
+  mimeType: string,
+  fname: string
+): Promise<string | null> {
+  const fakeAtt: ChatwootAttachment = {
+    content_type: mimeType,
+    extension: fname.split('.').pop()?.toLowerCase(),
+    file_type: mimeType.split('/')[0],
+  }
+
+  try {
+    if (isAudio(fakeAtt)) {
+      const text = await transcribeAudio(buf, mimeType)
+      return `[ÁUDIO TRANSCRITO]: ${text}`
+    }
+    if (isImage(fakeAtt)) {
+      const analysis = await analyzeImage(buf, mimeType)
+      return `[IMAGEM — análise]: ${analysis}`
+    }
+    if (isSpreadsheet(fakeAtt)) {
+      const { extractSpreadsheetText } = await import('@/lib/media/spreadsheet')
+      const { text, sheetsCount } = extractSpreadsheetText(buf)
+      return `[PLANILHA — ${fname}, ${sheetsCount} sheet(s)]: ${text}`
+    }
+    if (isPdf(fakeAtt)) {
+      try {
+        const { text, numPages } = await extractPdfText(buf)
+        return `[DOCUMENTO PDF — ${fname}, ${numPages}pg]: ${text}`
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : ''
+        if (msg.includes('escaneado')) {
+          return `[DOCUMENTO PDF — ${fname}]: PDF escaneado, não foi possível extrair texto.`
+        }
+        throw err
+      }
+    }
+    console.warn(`[media] processBuffer: unsupported type ${mimeType}`)
+    return null
+  } catch (err) {
+    console.warn('[media] processBuffer error:', err)
+    return null
+  }
+}
