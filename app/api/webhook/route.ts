@@ -3,6 +3,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { runAgent } from '@/lib/agent'
 import { sendMessage } from '@/lib/quepasa'
+import { sendChatwootReply } from '@/lib/chatwoot-send'
 import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 import { upsertContact, updateContactLabels } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
@@ -207,12 +208,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
-  if (!inbox.quepasa_host || !inbox.quepasa_token) {
-    console.warn(`[webhook] Inbox ${inbox.id} sem QuePasa configurado`)
-    return NextResponse.json({ ok: true })
-  }
-
-  console.log(`[webhook] processing inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA}`)
+  // Determine outbound channel:
+  // - QuePasa configured → WhatsApp (uses external gateway)
+  // - Otherwise → reply back through Chatwoot API itself (works for Website
+  //   widget, Email, API channel, etc.)
+  const useQuepasa = !!(inbox.quepasa_host && inbox.quepasa_token)
+  console.log(`[webhook] processing inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA} outbound=${useQuepasa ? 'quepasa' : 'chatwoot'}`)
 
   // Build tools — close over labelsState to mutate as agent calls them
   let labelsState: string[] = [...labels]
@@ -383,11 +384,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   console.log(`[webhook] replyLen=${reply.length}`)
 
-  await sendMessage(
-    { host: inbox.quepasa_host, token: inbox.quepasa_token },
-    chatId,
-    reply
-  )
+  if (useQuepasa) {
+    await sendMessage(
+      { host: inbox.quepasa_host!, token: inbox.quepasa_token! },
+      chatId,
+      reply
+    )
+  } else {
+    // Website widget / Email / API channel — reply via Chatwoot API
+    await sendChatwootReply(chatwootCfg, conversationId, reply)
+  }
 
   // Auto-add atendimento_ia after first reply (if not already there)
   if (!hasAtendimentoIA) {
