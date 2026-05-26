@@ -69,6 +69,15 @@ export async function createPartsSheet(params: {
   const token = await getAccessToken(account)
   const title = formatTitle(params.customerName, params.urgency)
 
+  // DEBUG: introspect the token to see what Google thinks of it
+  try {
+    const ti = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${token}`)
+    const tid = await ti.json()
+    console.log(`[sheets-debug] token prefix=${token.slice(0, 25)} scopes=${tid.scope ?? 'NONE'} err=${tid.error ?? 'none'}`)
+  } catch (e) {
+    console.log(`[sheets-debug] tokeninfo failed: ${(e as Error).message}`)
+  }
+
   // 1) Create the spreadsheet in the user's Drive
   const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
