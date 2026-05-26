@@ -8,7 +8,7 @@
  */
 
 import { getAdminClient } from '@/lib/supabase/admin'
-import { getAccessToken, EmailAccountRow } from '@/lib/google/gmail'
+import { EmailAccountRow } from '@/lib/google/gmail'
 import { refreshAccessToken } from '@/lib/google/oauth'
 
 export interface SheetItem {
