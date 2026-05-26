@@ -317,7 +317,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const admin = getAdminClient()
           await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', leadIds)
         } catch (err) {
-          console.warn(`[envia_pn] sheet creation failed (non-fatal):`, err)
+          const errMsg = (err as Error).message ?? String(err)
+          console.warn(`[envia_pn] sheet creation failed (non-fatal): ${errMsg.slice(0, 500)}`)
+          // Persist the error in lead notes for debugging
+          try {
+            const admin = getAdminClient()
+            await admin.from('leads').update({ notes: `[sheet_error] ${errMsg.slice(0, 400)}` }).in('id', leadIds)
+          } catch {}
         }
 
         // 3. Send WhatsApp to seller
