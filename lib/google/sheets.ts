@@ -9,6 +9,7 @@
 
 import { getAdminClient } from '@/lib/supabase/admin'
 import { getAccessToken, EmailAccountRow } from '@/lib/google/gmail'
+import { refreshAccessToken } from '@/lib/google/oauth'
 
 export interface SheetItem {
   part_number: string
@@ -66,17 +67,26 @@ export async function createPartsSheet(params: {
   urgency: 'AOG' | 'rotina'
 }): Promise<CreatedSheet> {
   const account = await loadSheetOAuthAccount()
-  const token = await getAccessToken(account)
-  const title = formatTitle(params.customerName, params.urgency)
 
-  // DEBUG: introspect the token to see what Google thinks of it
+  // Skip the cached access_token in DB — always refresh fresh. The cached
+  // token sometimes appears valid but Google rejects it (e.g. after secret
+  // rotation or scope change). A fresh refresh always works.
+  const fresh = await refreshAccessToken(account.refresh_token)
+  const token = fresh.access_token
+
+  // Persist the new token + expiry so other callers (Gmail poll) reuse it
   try {
-    const ti = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${token}`)
-    const tid = await ti.json()
-    console.log(`[sheets-debug] token prefix=${token.slice(0, 25)} scopes=${tid.scope ?? 'NONE'} err=${tid.error ?? 'none'}`)
-  } catch (e) {
-    console.log(`[sheets-debug] tokeninfo failed: ${(e as Error).message}`)
-  }
+    const admin = getAdminClient()
+    await admin
+      .from('email_accounts')
+      .update({
+        access_token: token,
+        expires_at: new Date(Date.now() + fresh.expires_in * 1000).toISOString(),
+      })
+      .eq('id', account.id)
+  } catch {}
+
+  const title = formatTitle(params.customerName, params.urgency)
 
   // 1) Create the spreadsheet in the user's Drive
   const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
