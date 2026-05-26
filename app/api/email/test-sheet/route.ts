@@ -51,6 +51,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     account_email: acc.email_address,
     connected_at: acc.created_at,
+    expires_at: acc.expires_at,
+    raw_tokeninfo: tokenInfo,
     scopes,
     has_spreadsheets_scope: hasSpreadsheets,
     has_drive_file_scope: hasDriveFile,
