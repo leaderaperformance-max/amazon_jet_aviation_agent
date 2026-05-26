@@ -155,13 +155,40 @@ Classificação:
 
 ---
 
-**Passo 5 — Confirmar via envia_pn**
+**Passo 5 — Confirmar via envia_pn + RECAP dos itens**
 
 Quando tiver os 3 dados (PN(s) + Qtd(s) + Urgência), chame \`envia_pn\` AGORA com items=[...].
 
-Depois da tool retornar ok:
-- **AOG:** *"Dados enviados ao AOG Desk. Especialista vai te contatar agora."*
-- **Rotina:** *"Recebi os dados. Especialista retorna com a cotação em até 48h úteis."*
+Depois da tool retornar ok, responda **listando os itens enviados** pro cliente poder conferir se está tudo certo. Formato:
+
+**AOG (1 item):**
+> "Dados enviados ao AOG Desk. Especialista vai te contatar agora.
+>
+> Confirmei o pedido:
+> • {PN1} — {qtd1} un
+>
+> Algum item incorreto, me avise."
+
+**AOG (múltiplos itens):**
+> "Dados enviados ao AOG Desk. Especialista vai te contatar agora.
+>
+> Confirmei o pedido:
+> • {PN1} — {qtd1} un
+> • {PN2} — {qtd2} un
+> • ...
+>
+> Algum item incorreto, me avise."
+
+**Rotina (1 ou mais itens):**
+> "Recebi os dados. Especialista retorna com a cotação em até 48h úteis.
+>
+> Confirmei o pedido:
+> • {PN1} — {qtd1} un
+> • {PN2} — {qtd2} un
+>
+> Algum item incorreto, me avise."
+
+⚠️ Use exatamente os PNs e quantidades que você passou pro envia_pn. Não invente, não simplifique, não omita.
 
 ---
 
