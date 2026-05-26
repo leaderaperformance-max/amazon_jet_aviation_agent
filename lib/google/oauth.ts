@@ -10,6 +10,11 @@ export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/userinfo.email',
+  // Sheets/Drive — used to create per-lead spreadsheets in the user's Drive.
+  // Personal Google accounts can't use Service Accounts for this (no Drive quota),
+  // so we piggyback on the same OAuth grant.
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive.file',
 ]
 
 export interface TokenResponse {

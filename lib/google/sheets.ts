@@ -1,53 +1,14 @@
 /**
- * Google Sheets integration via Service Account.
+ * Google Sheets integration via OAuth user token.
  *
- * Creates a new spreadsheet per lead with the items requested by the customer,
- * formatted exactly like the PartsToLoad.csv template (PartNumber, Quantity),
- * and shares it with the company Gmail account so the team can access.
+ * We piggyback on the OAuth refresh_token saved by the Gmail integration
+ * (table `email_accounts`). Personal Google accounts can't use Service
+ * Accounts to create Drive files (no quota), so we create the spreadsheet
+ * AS the connected user — file ends up in their Drive automatically.
  */
 
-import { GoogleAuth } from 'google-auth-library'
-
-const SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.file',
-]
-
-interface ServiceAccountKey {
-  type: 'service_account'
-  project_id: string
-  private_key: string
-  client_email: string
-  [k: string]: unknown
-}
-
-function loadServiceAccountKey(): ServiceAccountKey {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY env missing')
-  // We store it base64-encoded so multi-line private keys survive env injection
-  const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-  try {
-    return JSON.parse(decoded) as ServiceAccountKey
-  } catch {
-    // Fallback: maybe it was stored as raw JSON
-    return JSON.parse(raw) as ServiceAccountKey
-  }
-}
-
-let _auth: GoogleAuth | null = null
-function getAuth(): GoogleAuth {
-  if (_auth) return _auth
-  const credentials = loadServiceAccountKey()
-  _auth = new GoogleAuth({ credentials, scopes: SCOPES })
-  return _auth
-}
-
-async function getAccessToken(): Promise<string> {
-  const client = await getAuth().getClient()
-  const { token } = await client.getAccessToken()
-  if (!token) throw new Error('Failed to get Google access token')
-  return token
-}
+import { getAdminClient } from '@/lib/supabase/admin'
+import { getAccessToken, EmailAccountRow } from '@/lib/google/gmail'
 
 export interface SheetItem {
   part_number: string
@@ -58,6 +19,29 @@ export interface CreatedSheet {
   spreadsheetId: string
   url: string
   title: string
+}
+
+/**
+ * Find the OAuth account we should use to create sheets. Defaults to
+ * the email configured in SHEET_SHARE_WITH (the company Gmail).
+ */
+async function loadSheetOAuthAccount(): Promise<EmailAccountRow> {
+  const targetEmail = process.env.SHEET_SHARE_WITH ?? 'amazonjetaviation@gmail.com'
+  const admin = getAdminClient()
+  const { data, error } = await admin
+    .from('email_accounts')
+    .select('id, email_address, refresh_token, access_token, expires_at, history_id')
+    .eq('email_address', targetEmail)
+    .eq('enabled', true)
+    .maybeSingle()
+
+  if (error || !data) {
+    throw new Error(
+      `No OAuth account configured for sheet creation (looking for ${targetEmail}). ` +
+      `Connect Gmail in /dashboard/email first.`
+    )
+  }
+  return data as EmailAccountRow
 }
 
 function formatTitle(customerName: string | null, urgency: 'AOG' | 'rotina'): string {
@@ -75,35 +59,37 @@ function formatTitle(customerName: string | null, urgency: 'AOG' | 'rotina'): st
   return `${prefix}Cotação - ${safeName} - ${date} ${time}`
 }
 
-/**
- * Creates a new Google Sheet, populates it with the items, shares it
- * with the configured company email, and returns the public URL.
- */
 export async function createPartsSheet(params: {
   customerName: string | null
   customerPhone: string | null
   items: SheetItem[]
   urgency: 'AOG' | 'rotina'
 }): Promise<CreatedSheet> {
-  const token = await getAccessToken()
+  const account = await loadSheetOAuthAccount()
+  const token = await getAccessToken(account)
   const title = formatTitle(params.customerName, params.urgency)
 
-  // 1) Create spreadsheet (one sheet, no formatting yet)
+  // 1) Create the spreadsheet in the user's Drive
   const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       properties: { title },
-      sheets: [{ properties: { title: 'Parts', gridProperties: { rowCount: params.items.length + 10, columnCount: 2 } } }],
+      sheets: [{
+        properties: {
+          title: 'Parts',
+          gridProperties: { rowCount: params.items.length + 10, columnCount: 2 },
+        },
+      }],
     }),
   })
   if (!createRes.ok) {
     const err = await createRes.text().catch(() => '')
-    throw new Error(`sheets.create failed ${createRes.status}: ${err.slice(0, 200)}`)
+    throw new Error(`sheets.create ${createRes.status}: ${err.slice(0, 200)}`)
   }
   const created = (await createRes.json()) as { spreadsheetId: string; spreadsheetUrl: string }
 
-  // 2) Write header + rows
+  // 2) Populate values
   const values = [
     ['PartNumber', 'Quantity'],
     ...params.items.map(i => [i.part_number, String(i.quantity)]),
@@ -118,10 +104,10 @@ export async function createPartsSheet(params: {
   )
   if (!updateRes.ok) {
     const err = await updateRes.text().catch(() => '')
-    throw new Error(`sheets.values.update failed ${updateRes.status}: ${err.slice(0, 200)}`)
+    throw new Error(`sheets.values.update ${updateRes.status}: ${err.slice(0, 200)}`)
   }
 
-  // 3) Format header row (bold, frozen)
+  // 3) Format header (non-fatal)
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${created.spreadsheetId}:batchUpdate`,
     {
@@ -151,25 +137,6 @@ export async function createPartsSheet(params: {
       }),
     },
   ).catch(err => console.warn('[sheets] format failed (non-fatal):', err))
-
-  // 4) Share with company email (writer access)
-  const shareWith = process.env.SHEET_SHARE_WITH ?? 'amazonjetaviation@gmail.com'
-  const shareRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${created.spreadsheetId}/permissions?sendNotificationEmail=false`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'user',
-        role: 'writer',
-        emailAddress: shareWith,
-      }),
-    },
-  )
-  if (!shareRes.ok) {
-    const err = await shareRes.text().catch(() => '')
-    console.warn(`[sheets] share with ${shareWith} failed: ${err.slice(0, 200)}`)
-  }
 
   return {
     spreadsheetId: created.spreadsheetId,
