@@ -13,6 +13,7 @@ import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import { validatePartNumber, extractPartNumbersFromText } from '@/lib/part-number'
 import { insertPending, hasNewerPending, drainPending } from '@/lib/debounce'
 import { createLead } from '@/lib/leads'
+import { createPartsSheet } from '@/lib/google/sheets'
 
 interface ChatwootSender {
   id?: number
@@ -299,7 +300,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           leadIds.push(lead.id)
         }
 
-        // 2. Send WhatsApp to seller
+        // 2. Create Google Sheet with all items in PartNumber,Quantity format.
+        // Non-fatal: if it fails (e.g. quota or auth), we still notify the seller.
+        let sheetUrl: string | null = null
+        try {
+          const sheet = await createPartsSheet({
+            customerName: finalName,
+            customerPhone: finalPhone,
+            items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+            urgency: args.urgency,
+          })
+          sheetUrl = sheet.url
+          console.log(`[envia_pn] sheet created: ${sheet.url}`)
+
+          // Persist sheet_url on each lead row created above
+          const admin = getAdminClient()
+          await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', leadIds)
+        } catch (err) {
+          console.warn(`[envia_pn] sheet creation failed (non-fatal):`, err)
+        }
+
+        // 3. Send WhatsApp to seller
         const sellerPhone = (inbox as unknown as { seller_phone?: string | null }).seller_phone
         if (sellerPhone && inbox.quepasa_host && inbox.quepasa_token) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
@@ -319,6 +340,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             itemsBlock,
             '',
             args.general_notes ? `📝 _${args.general_notes}_` : null,
+            sheetUrl ? `📊 *Planilha:* ${sheetUrl}` : null,
             '',
             '🔗 Atender em:',
             chatwootUrl,
@@ -333,11 +355,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           console.warn(`[envia_pn] seller_phone or quepasa not configured for inbox ${inbox.id}`)
         }
 
-        // 3. Add tag orcamento_enviado
+        // 4. Add tag orcamento_enviado
         labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
         await updateContactLabels(contact.id, labelsState)
 
-        return { ok: true, lead_ids: leadIds, count: args.items.length }
+        return { ok: true, lead_ids: leadIds, count: args.items.length, sheet_url: sheetUrl }
       },
     }),
   }
