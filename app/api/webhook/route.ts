@@ -359,8 +359,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           }
         }
 
-        // Detect channel for the seller message
-        const channelLabel = inbox.quepasa_host ? 'WhatsApp' : `Site (${inbox.name})`
+        // Detect channel label for the seller notification.
+        // Pattern-match on inbox name to give a clean origin tag (Instagram,
+        // Site, WhatsApp, etc) without needing a separate DB column.
+        const channelLabel = (() => {
+          if (inbox.quepasa_host) return 'WhatsApp'
+          const lower = inbox.name.toLowerCase()
+          if (lower.includes('instagram') || lower.includes('direct') || lower.includes(' ig')) {
+            return `Instagram (${inbox.name})`
+          }
+          if (lower.includes('facebook') || lower.includes('messenger') || lower.includes(' fb')) {
+            return `Facebook (${inbox.name})`
+          }
+          if (lower.includes('site') || lower.includes('web') || lower.includes('widget')) {
+            return `Site (${inbox.name})`
+          }
+          if (lower.includes('email') || lower.includes('mail')) {
+            return `Email (${inbox.name})`
+          }
+          return inbox.name
+        })()
 
         if (sellerPhone && quepasaCfg) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
