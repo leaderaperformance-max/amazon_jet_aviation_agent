@@ -121,6 +121,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
+  // Bot NUNCA responde em grupos do WhatsApp. Mensagens cujo identificador
+  // do remetente contém "@g.us" são de grupo — só leitura, sem reply.
+  if (sessionId.includes('@g.us') || chatId.includes('@g.us')) {
+    console.log(`[webhook] SKIP: group message (no replies in groups) sessionId=${sessionId}`)
+    return NextResponse.json({ ok: true })
+  }
+
   const labels = data.conversation?.labels ?? data.labels ?? []
 
   // Process attachments (audio/image/pdf) — enriches the content
