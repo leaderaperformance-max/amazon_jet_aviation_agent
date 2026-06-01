@@ -336,9 +336,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           } catch {}
         }
 
-        // 3. Send WhatsApp to seller
+        // 3. Send WhatsApp to seller — uses QuePasa from THIS inbox if available,
+        // otherwise falls back to ANY inbox that has QuePasa configured.
+        // This way leads from the Website widget (no QuePasa) still notify the group.
         const sellerPhone = (inbox as unknown as { seller_phone?: string | null }).seller_phone
-        if (sellerPhone && inbox.quepasa_host && inbox.quepasa_token) {
+        let quepasaCfg: { host: string; token: string } | null = null
+        if (inbox.quepasa_host && inbox.quepasa_token) {
+          quepasaCfg = { host: inbox.quepasa_host, token: inbox.quepasa_token }
+        } else {
+          // Fallback: load any enabled inbox with QuePasa
+          const admin = getAdminClient()
+          const { data: gw } = await admin
+            .from('inboxes')
+            .select('quepasa_host, quepasa_token')
+            .not('quepasa_host', 'is', null)
+            .not('quepasa_token', 'is', null)
+            .eq('enabled', true)
+            .limit(1)
+            .maybeSingle()
+          if (gw?.quepasa_host && gw?.quepasa_token) {
+            quepasaCfg = { host: gw.quepasa_host, token: gw.quepasa_token }
+          }
+        }
+
+        // Detect channel for the seller message
+        const channelLabel = inbox.quepasa_host ? 'WhatsApp' : `Site (${inbox.name})`
+
+        if (sellerPhone && quepasaCfg) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
           const urgencyEmoji = args.urgency === 'AOG' ? '🔴' : '🟡'
 
@@ -349,8 +373,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const sellerMsg = [
             '🆕 *NOVO LEAD QUALIFICADO*',
             '',
+            `📡 *Origem:* ${channelLabel}`,
             `👤 *Cliente:* ${finalName ?? '(sem nome)'}`,
-            `📱 *WhatsApp:* ${finalPhone ?? '(não informado)'}`,
+            finalPhone ? `📱 *WhatsApp:* ${finalPhone}` : null,
             `⚡ *Urgência:* ${args.urgency} ${urgencyEmoji}`,
             '',
             itemsBlock,
@@ -362,13 +387,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             chatwootUrl,
           ].filter(Boolean).join('\n')
 
-          await sendMessage(
-            { host: inbox.quepasa_host, token: inbox.quepasa_token },
-            sellerPhone,
-            sellerMsg
-          )
+          await sendMessage(quepasaCfg, sellerPhone, sellerMsg)
         } else {
-          console.warn(`[envia_pn] seller_phone or quepasa not configured for inbox ${inbox.id}`)
+          console.warn(`[envia_pn] seller_phone or QuePasa fallback not available for inbox ${inbox.id}`)
         }
 
         // 4. Add tag orcamento_enviado
