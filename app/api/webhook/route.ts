@@ -365,12 +365,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const channelLabel = (() => {
           if (inbox.quepasa_host) return 'WhatsApp'
           const lower = inbox.name.toLowerCase()
-          if (lower.includes('instagram') || lower.includes('direct') || lower.includes(' ig')) {
-            return `Instagram (${inbox.name})`
-          }
-          if (lower.includes('facebook') || lower.includes('messenger') || lower.includes(' fb')) {
-            return `Facebook (${inbox.name})`
-          }
+          const hasIG = lower.includes('instagram') || lower.includes('direct') || /\big\b/.test(lower)
+          const hasMSG = lower.includes('messenger') || /\bmsg\b/.test(lower) || /\bfb\b/.test(lower) || lower.includes('facebook')
+          if (hasIG && hasMSG) return `Instagram/Messenger (${inbox.name})`
+          if (hasIG) return `Instagram (${inbox.name})`
+          if (hasMSG) return `Messenger (${inbox.name})`
           if (lower.includes('site') || lower.includes('web') || lower.includes('widget')) {
             return `Site (${inbox.name})`
           }
