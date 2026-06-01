@@ -270,7 +270,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     }),
     envia_pn: tool({
-      description: 'Envia lead qualificado ao vendedor humano. Aceita 1+ items (Part Number + quantidade). CHAME quando tiver todos os dados.',
+      description: 'Envia lead qualificado ao vendedor humano. Aceita 1+ items (Part Number + quantidade). CHAME quando tiver todos os dados. Use general_notes pra incluir contexto adicional como modelo da aeronave (formato: "Aeronave: Cessna 172") ou outras informações estratégicas do SPIN.',
       inputSchema: z.object({
         items: z.array(z.object({
           part_number: z.string(),
@@ -278,7 +278,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           notes: z.string().optional(),
         })).min(1),
         urgency: z.enum(['AOG', 'rotina']),
-        general_notes: z.string().optional(),
+        general_notes: z.string().optional().describe('Contexto adicional: aeronave (ex. "Aeronave: Cessna 172"), urgência operacional, frequência de uso, etc.'),
       }),
       execute: async (args) => {
         const finalName = (senderName && senderName.trim()) || null
