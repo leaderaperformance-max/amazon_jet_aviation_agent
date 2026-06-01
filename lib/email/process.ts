@@ -156,7 +156,11 @@ export async function processOneMessage(
   // Send WhatsApp notification
   if (notifyCfg) {
     const text = formatSellerMessage(email, summary)
-    const recipient = notifyCfg.seller_phone.replace(/[^\d]/g, '')
+    // If it's a JID (contains @ — e.g. group "...@g.us"), pass as-is.
+    // Otherwise strip non-digits for plain phone numbers.
+    const recipient = notifyCfg.seller_phone.includes('@')
+      ? notifyCfg.seller_phone
+      : notifyCfg.seller_phone.replace(/[^\d]/g, '')
     try {
       await sendMessage(
         { host: notifyCfg.quepasa_host, token: notifyCfg.quepasa_token },
