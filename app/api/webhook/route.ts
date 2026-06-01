@@ -114,16 +114,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const senderPhone = data.meta?.sender?.phone_number ?? message.sender?.phone_number
   const senderName = data.meta?.sender?.name ?? message.sender?.name
   const chatId = extractChatId(senderIdent, senderPhone)
-  const sessionId = senderIdent
 
-  if (!sessionId || !chatId) {
-    console.warn(`[webhook] SKIP: cannot extract sessionId/chatId`)
-    return NextResponse.json({ ok: true })
-  }
+  // Session: prefer the stable sender identifier (WhatsApp JID, email),
+  // fall back to a per-conversation key (Website widget visitors often have
+  // no identifier/phone at all until they provide email).
+  const sessionId = senderIdent ?? `chatwoot-conv-${conversationId}`
+
+  // chatId only matters for QuePasa (WhatsApp). For Website/email channels
+  // we reply via Chatwoot API which uses conversationId — chatId can be empty.
 
   // Bot NUNCA responde em grupos do WhatsApp. Mensagens cujo identificador
   // do remetente contém "@g.us" são de grupo — só leitura, sem reply.
-  if (sessionId.includes('@g.us') || chatId.includes('@g.us')) {
+  if (sessionId.includes('@g.us') || (chatId && chatId.includes('@g.us'))) {
     console.log(`[webhook] SKIP: group message (no replies in groups) sessionId=${sessionId}`)
     return NextResponse.json({ ok: true })
   }
@@ -392,6 +394,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   console.log(`[webhook] replyLen=${reply.length}`)
 
   if (useQuepasa) {
+    if (!chatId) {
+      console.warn(`[webhook] QuePasa precisa de chatId mas nenhum foi extraido — pulando reply`)
+      return NextResponse.json({ ok: true })
+    }
     await sendMessage(
       { host: inbox.quepasa_host!, token: inbox.quepasa_token! },
       chatId,
