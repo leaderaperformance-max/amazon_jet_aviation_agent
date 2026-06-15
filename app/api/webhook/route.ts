@@ -16,6 +16,10 @@ import { insertPending, hasNewerPending, drainPending } from '@/lib/debounce'
 import { createLead } from '@/lib/leads'
 import { createPartsSheet } from '@/lib/google/sheets'
 
+// Allow the function to run long enough for the debounce wait (até 40s)
+// + processamento do agente. Máximo do plano Hobby do Vercel é 60s.
+export const maxDuration = 60
+
 interface ChatwootSender {
   id?: number
   identifier?: string
@@ -162,8 +166,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const inserted = await insertPending(sessionId, enrichedContent, message.id)
     console.log(`[debounce] inserted pending ${inserted.id} for session ${sessionId}`)
 
-    // Wait 5s (configurable via DEBOUNCE_DELAY_MS env var, e.g. 0 for tests)
-    const delayMs = parseInt(process.env.DEBOUNCE_DELAY_MS ?? '5000', 10)
+    // Debounce window: clientes mandam mensagens picadas ("oi" / "tudo bem" /
+    // "quero cotação"). Esperamos pra juntar tudo antes de processar.
+    // - Texto puro: janela longa (DEBOUNCE_DELAY_MS, default 40s)
+    // - Com anexo (PDF/imagem/áudio): janela curta — anexo costuma ser um
+    //   pedido completo, e o processamento do anexo já consome tempo do budget
+    //   de 60s da função.
+    const longDelay = parseInt(process.env.DEBOUNCE_DELAY_MS ?? '40000', 10)
+    const shortDelay = parseInt(process.env.DEBOUNCE_DELAY_ATTACH_MS ?? '8000', 10)
+    const delayMs = attachments.length > 0 ? shortDelay : longDelay
     await new Promise(r => setTimeout(r, delayMs))
 
     // Check if newer message arrived
