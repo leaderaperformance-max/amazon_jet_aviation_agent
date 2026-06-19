@@ -128,17 +128,19 @@ describe('drainPending', () => {
     expect(result.combinedContent).toBe('')
   })
 
-  it('uses RPC result when RPC succeeds', async () => {
-    rpcResult = {
+  it('retorna o context da última mensagem', async () => {
+    selectResult = {
       data: [
-        { id: 'r1', content: 'msg a', received_at: '2026-05-18T10:00:00Z' },
-        { id: 'r2', content: 'msg b', received_at: '2026-05-18T10:00:02Z' },
+        { id: 'r1', content: 'msg a', received_at: '2026-05-18T10:00:00Z', context: { conversationId: 1 } },
+        { id: 'r2', content: 'msg b', received_at: '2026-05-18T10:00:02Z', context: { conversationId: 2 } },
       ],
       error: null,
     }
+    updateResult = { data: null, error: null }
 
     const result = await drainPending('session-abc')
     expect(result.combinedContent).toBe('msg a\n\nmsg b')
     expect(result.ids).toEqual(['r1', 'r2'])
+    expect(result.context).toEqual({ conversationId: 2 })
   })
 })
