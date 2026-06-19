@@ -9,7 +9,10 @@
  * o webhook cai num fallback (processa na hora, sem agrupar).
  */
 
-const QSTASH_URL = 'https://qstash.upstash.io/v2/publish'
+// Base do QStash. Conta EU usa qstash-eu-central-1; configurável via QSTASH_URL.
+function qstashBase(): string {
+  return (process.env.QSTASH_URL ?? 'https://qstash.upstash.io').replace(/\/$/, '')
+}
 
 export function isQStashEnabled(): boolean {
   return !!process.env.QSTASH_TOKEN && !!process.env.APP_URL
@@ -31,7 +34,7 @@ export async function scheduleDrain(
 
   const callback = `${appUrl.replace(/\/$/, '')}/api/process-pending?secret=${secret}`
 
-  const res = await fetch(`${QSTASH_URL}/${encodeURIComponent(callback)}`, {
+  const res = await fetch(`${qstashBase()}/v2/publish/${encodeURIComponent(callback)}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
