@@ -34,7 +34,8 @@ export async function scheduleDrain(
 
   const callback = `${appUrl.replace(/\/$/, '')}/api/process-pending?secret=${secret}`
 
-  const res = await fetch(`${qstashBase()}/v2/publish/${encodeURIComponent(callback)}`, {
+  // QStash espera a URL de destino CRUA após /v2/publish/ (não URL-encoded).
+  const res = await fetch(`${qstashBase()}/v2/publish/${callback}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
