@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { hasNewerPending, drainPending } from '@/lib/debounce'
+import { hasNewerPending } from '@/lib/debounce'
 import { loadInboxByChatwootId } from '@/lib/inboxes'
-import { processIncomingMessage, type IncomingContext } from '@/lib/process-incoming'
+import { processIncomingMessage, drainAndBuildContent } from '@/lib/process-incoming'
 
 /**
  * POST /api/process-pending?secret=CRON_SECRET
@@ -38,14 +38,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'newer_exists' })
   }
 
-  // Drena tudo da sessão
-  const { combinedContent, context, ids } = await drainPending(sessionId)
-  if (ids.length === 0 || !combinedContent.trim()) {
+  // Drena tudo da sessão E extrai anexos (PDF/imagem/etc) em paralelo
+  const { content, context, count } = await drainAndBuildContent(sessionId)
+  if (count === 0 || !content.trim()) {
     console.log(`[process-pending] ${sessionId}: nothing to drain`)
     return NextResponse.json({ ok: true, skipped: 'empty' })
   }
 
-  const ctx = context as IncomingContext | null
+  const ctx = context
   if (!ctx?.chatwootInboxId) {
     console.warn(`[process-pending] ${sessionId}: missing context, cannot process`)
     return NextResponse.json({ ok: false, error: 'no context' })
@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await processIncomingMessage(inbox, ctx, combinedContent)
-    console.log(`[process-pending] ${sessionId}: processed ${ids.length} message(s)`)
-    return NextResponse.json({ ok: true, processed: ids.length })
+    await processIncomingMessage(inbox, ctx, content)
+    console.log(`[process-pending] ${sessionId}: processed ${count} message(s)`)
+    return NextResponse.json({ ok: true, processed: count })
   } catch (err) {
     console.error(`[process-pending] ${sessionId} error:`, err)
     return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 })

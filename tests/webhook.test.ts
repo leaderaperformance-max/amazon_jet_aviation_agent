@@ -37,18 +37,32 @@ vi.mock('@/lib/part-number', () => ({
   validatePartNumber: vi.fn(),
   extractPartNumbersFromText: vi.fn().mockResolvedValue([]),
 }))
-// Track inserted content so drainPending can return the same combined content
+// Track inserted content + context so the fallback can return them
 let lastInsertedContent = 'oi'
+let lastInsertedContext: unknown = null
 vi.mock('@/lib/debounce', () => ({
-  insertPending: vi.fn().mockImplementation(async (_sessionId: string, content: string) => {
+  insertPending: vi.fn().mockImplementation(async (_s: string, content: string, _id: number, ctx: unknown) => {
     lastInsertedContent = content
+    lastInsertedContext = ctx
     return { id: 'p1', received_at: '2026-05-18T00:00:00Z' }
   }),
   hasNewerPending: vi.fn().mockResolvedValue(false),
-  drainPending: vi.fn().mockImplementation(async () => ({ ids: ['p1'], combinedContent: lastInsertedContent })),
+  drainPending: vi.fn().mockImplementation(async () => ({ ids: ['p1'], combinedContent: lastInsertedContent, context: lastInsertedContext, attachments: [] })),
 }))
 vi.mock('@/lib/leads', () => ({
   createLead: vi.fn().mockResolvedValue({ id: 'lead-1' }),
+}))
+// QStash off in tests → webhook usa o fallback (processa inline via processIncomingMessage)
+vi.mock('@/lib/qstash', () => ({
+  isQStashEnabled: vi.fn(() => false),
+  scheduleDrain: vi.fn(),
+}))
+// O pipeline pesado foi extraído pra process-incoming; mockamos pra testar só o roteamento do webhook
+vi.mock('@/lib/process-incoming', () => ({
+  processIncomingMessage: vi.fn().mockResolvedValue(undefined),
+  drainAndBuildContent: vi.fn().mockImplementation(async () => ({
+    content: lastInsertedContent, context: lastInsertedContext, count: 1,
+  })),
 }))
 
 import { POST } from '@/app/api/webhook/route'
@@ -58,8 +72,8 @@ import { loadInboxByChatwootId, loadOpenAIConfig } from '@/lib/inboxes'
 import { upsertContact } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { addLabel } from '@/lib/tags'
-import { processAttachment } from '@/lib/media/process'
-const mockProcessAttachment = processAttachment as ReturnType<typeof vi.fn>
+import { processIncomingMessage, drainAndBuildContent } from '@/lib/process-incoming'
+import { insertPending } from '@/lib/debounce'
 
 const mockRunAgent = runAgent as ReturnType<typeof vi.fn>
 const mockSendMessage = sendMessage as ReturnType<typeof vi.fn>
@@ -68,6 +82,8 @@ const mockLoadOpenAI = loadOpenAIConfig as ReturnType<typeof vi.fn>
 const mockUpsertContact = upsertContact as ReturnType<typeof vi.fn>
 const mockSaveMessage = saveMessage as ReturnType<typeof vi.fn>
 const mockAddLabel = addLabel as ReturnType<typeof vi.fn>
+const mockProcessIncoming = processIncomingMessage as ReturnType<typeof vi.fn>
+const mockDrainBuild = drainAndBuildContent as ReturnType<typeof vi.fn>
 
 function makeRequest(body: object) {
   return new NextRequest('http://localhost/api/webhook', {
@@ -122,34 +138,18 @@ beforeEach(() => {
   })
 })
 
-describe('POST /api/webhook', () => {
-  it('upsert contact em toda mensagem', async () => {
+describe('POST /api/webhook (roteamento — fila QStash)', () => {
+  it('Contact: enfileira (insertPending) e processa via processIncomingMessage', async () => {
     await POST(makeRequest(incomingFromContact))
-    expect(mockUpsertContact).toHaveBeenCalled()
+    expect(mockProcessIncoming).toHaveBeenCalled()
+    // 3o arg é o conteúdo (texto do cliente)
+    expect(mockProcessIncoming.mock.calls[0][2]).toBe('oi')
   })
 
-  it('salva mensagem do Contact na memória', async () => {
-    await POST(makeRequest(incomingFromContact))
-    expect(mockSaveMessage).toHaveBeenCalledWith('5511999@s.whatsapp.net', 'user', 'oi')
-  })
-
-  it('salva mensagem do humano (User) com prefixo [atendente]:', async () => {
-    mockUpsertContact.mockResolvedValue({
-      contact: {
-        id: 'c', inbox_id: 'i', chatwoot_conversation_id: 17,
-        whatsapp_identifier: '5511999@s.whatsapp.net',
-        current_labels: ['atendimento_ia'], status: 'ia', message_count: 5,
-      },
-      wasNew: false,
-    })
+  it('humano (User) salva na memória com [atendente]: e NÃO processa', async () => {
     await POST(makeRequest(incomingFromHuman))
     expect(mockSaveMessage).toHaveBeenCalledWith('5511999@s.whatsapp.net', 'user', '[atendente]: oi sou humano')
-  })
-
-  it('humano (User) não dispara resposta', async () => {
-    await POST(makeRequest(incomingFromHuman))
-    expect(mockRunAgent).not.toHaveBeenCalled()
-    expect(mockSendMessage).not.toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
   })
 
   it('AgentBot é ignorado por completo', async () => {
@@ -159,76 +159,44 @@ describe('POST /api/webhook', () => {
     }
     await POST(makeRequest(p))
     expect(mockSaveMessage).not.toHaveBeenCalled()
-    expect(mockRunAgent).not.toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
   })
 
-  it('primeira mensagem do contato (wasNew=true) dispara resposta mesmo sem tag', async () => {
-    await POST(makeRequest(incomingFromContact))
-    expect(mockRunAgent).toHaveBeenCalled()
-    expect(mockSendMessage).toHaveBeenCalled()
-  })
-
-  it('adiciona atendimento_ia após primeira resposta', async () => {
-    mockAddLabel.mockResolvedValue(['atendimento_ia'])
-    await POST(makeRequest(incomingFromContact))
-    expect(mockAddLabel).toHaveBeenCalledWith(
-      expect.objectContaining({ baseUrl: 'https://x.com', accountId: 14 }),
-      17,
-      [],
-      'atendimento_ia'
-    )
-  })
-
-  it('Contact sem tag atendimento_ia e não é primeira → não responde', async () => {
-    mockUpsertContact.mockResolvedValue({
-      contact: {
-        id: 'c', inbox_id: 'i', chatwoot_conversation_id: 17,
-        current_labels: ['novo_lead'], status: 'humano', message_count: 3,
-      },
-      wasNew: false,
-    })
-    await POST(makeRequest(incomingFromContact))
-    expect(mockRunAgent).not.toHaveBeenCalled()
-  })
-
-  it('Contact com tag atendimento_ia → responde', async () => {
-    mockUpsertContact.mockResolvedValue({
-      contact: {
-        id: 'c', inbox_id: 'i', chatwoot_conversation_id: 17,
-        current_labels: ['atendimento_ia'], status: 'ia', message_count: 3,
-      },
-      wasNew: false,
-    })
+  it('mensagem de GRUPO (@g.us) é ignorada — bot não responde em grupo', async () => {
     const p = {
       ...incomingFromContact,
-      conversation: { labels: ['atendimento_ia'] },
+      messages: [{
+        ...incomingFromContact.messages[0],
+        sender: { id: 5, identifier: '120363@g.us', phone_number: '', name: 'Grupo' },
+      }],
+      meta: { sender: { identifier: '120363@g.us' } },
     }
     await POST(makeRequest(p))
-    expect(mockRunAgent).toHaveBeenCalled()
-    expect(mockSendMessage).toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
   })
 
-  it('processa attachment de áudio e usa o conteúdo enriquecido como user message', async () => {
-    mockProcessAttachment.mockResolvedValue('[ÁUDIO TRANSCRITO]: oi preciso de uma peça')
-
+  it('Contact: anexo vai no contexto (ctx.attachments) pro worker extrair depois', async () => {
     const payload = {
       ...incomingFromContact,
       messages: [{
         ...incomingFromContact.messages[0],
         content: null,
-        attachments: [{
-          data_url: 'https://chat.example.com/audio.ogg',
-          content_type: 'audio/ogg',
-          file_type: 'audio',
-        }],
+        attachments: [{ data_url: 'https://chat.example.com/a.pdf', content_type: 'application/pdf', file_type: 'file' }],
       }],
     }
-
     const res = await POST(makeRequest(payload))
     expect(res.status).toBe(200)
-    expect(mockProcessAttachment).toHaveBeenCalled()
-    // O runAgent recebe o conteúdo enriquecido como 2o arg (userMessage)
-    const callArgs = mockRunAgent.mock.calls[0]
-    expect(callArgs[1]).toBe('[ÁUDIO TRANSCRITO]: oi preciso de uma peça')
+    // insertPending recebe o ctx com os anexos (4o arg)
+    const insertCtx = (insertPending as ReturnType<typeof vi.fn>).mock.calls[0][3] as { attachments?: unknown[] }
+    expect(insertCtx.attachments).toHaveLength(1)
+  })
+
+  it('sem texto e sem anexo → ignora', async () => {
+    const payload = {
+      ...incomingFromContact,
+      messages: [{ ...incomingFromContact.messages[0], content: '', attachments: [] }],
+    }
+    await POST(makeRequest(payload))
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
   })
 })

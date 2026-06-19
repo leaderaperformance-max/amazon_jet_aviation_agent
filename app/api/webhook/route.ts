@@ -3,10 +3,10 @@ import { loadInboxByChatwootId } from '@/lib/inboxes'
 import { upsertContact } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
-import { insertPending, drainPending } from '@/lib/debounce'
+import { type ChatwootAttachment } from '@/lib/media/process'
+import { insertPending } from '@/lib/debounce'
 import { isQStashEnabled, scheduleDrain } from '@/lib/qstash'
-import { processIncomingMessage, type IncomingContext } from '@/lib/process-incoming'
+import { processIncomingMessage, drainAndBuildContent, type IncomingContext } from '@/lib/process-incoming'
 
 // Webhook fica curto: recebe, enfileira, retorna. Processamento pesado vai
 // pro worker (/api/process-pending) via QStash. maxDuration baixo é suficiente.
@@ -128,25 +128,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const labels = data.conversation?.labels ?? data.labels ?? []
 
-  // Process attachments (audio/image/pdf) — enriches the content
+  // Anexos NÃO são extraídos aqui — guardamos a referência e o worker
+  // (process-pending, 60s) baixa+extrai depois do debounce, em paralelo.
+  // Isso evita timeout do webhook com PDFs pesados e agrupa múltiplos PDFs.
   const attachments = ((message as unknown) as { attachments?: ChatwootAttachment[] }).attachments ?? []
-  let enrichedContent = message.content ?? ''
+  const textContent = message.content ?? ''
 
-  for (const att of attachments) {
-    try {
-      const processed = await processAttachment(att)
-      if (processed) {
-        enrichedContent = enrichedContent
-          ? `${enrichedContent}\n\n${processed}`
-          : processed
-      }
-    } catch (err) {
-      console.warn('[webhook] attachment processing error:', err)
-    }
-  }
-
-  if (!enrichedContent.trim()) {
-    console.warn(`[webhook] SKIP: no usable content (no text and no processable attachment)`)
+  // Pula só se NÃO tem texto E NÃO tem anexo
+  if (!textContent.trim() && attachments.length === 0) {
+    console.warn(`[webhook] SKIP: sem texto e sem anexo`)
     return NextResponse.json({ ok: true })
   }
 
@@ -163,10 +153,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       phone_number: senderPhone ?? null,
       whatsapp_identifier: senderIdent ?? null,
       current_labels: labels,
-      last_message: enrichedContent,
+      last_message: textContent || '[anexo]',
       last_message_at: new Date().toISOString(),
     })
-    await saveMessage(sessionId, 'user', `[atendente]: ${message.content ?? ''}`)
+    await saveMessage(sessionId, 'user', `[atendente]: ${textContent}`)
     console.log(`[webhook] DONE: atendente message saved, no reply`)
     return NextResponse.json({ ok: true })
   }
@@ -187,35 +177,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     chatId,
     chatwootContactId: message.sender?.id ?? null,
     labels,
+    attachments: attachments.length > 0 ? attachments : undefined,
   }
 
-  // Insere na fila de debounce (agrupa mensagens picadas do cliente)
-  const inserted = await insertPending(sessionId, enrichedContent, message.id, ctx)
-  console.log(`[webhook] pending ${inserted.id} session=${sessionId}`)
+  // Insere na fila (content = só texto; anexos vão no context pro worker extrair)
+  const inserted = await insertPending(sessionId, textContent, message.id, ctx)
+  console.log(`[webhook] pending ${inserted.id} session=${sessionId} anexos=${attachments.length}`)
 
-  // Janela de debounce: anexo = pedido completo (curto); texto = junta picadas (longo)
+  // Debounce: anexo precisa de janela pra agrupar múltiplos PDFs que chegam
+  // em tempos diferentes; texto junta as picadas.
   const longDelay = parseInt(process.env.DEBOUNCE_DELAY_SEC ?? '25', 10)
-  const shortDelay = parseInt(process.env.DEBOUNCE_DELAY_ATTACH_SEC ?? '5', 10)
-  const delaySec = attachments.length > 0 ? shortDelay : longDelay
+  const attachDelay = parseInt(process.env.DEBOUNCE_DELAY_ATTACH_SEC ?? '15', 10)
+  const delaySec = attachments.length > 0 ? attachDelay : longDelay
 
   if (isQStashEnabled()) {
-    // PRODUÇÃO: agenda o processamento via QStash (não bloqueia a função → sem timeout)
     try {
       await scheduleDrain(sessionId, inserted.received_at, delaySec)
       console.log(`[webhook] scheduled drain via QStash in ${delaySec}s`)
       return NextResponse.json({ ok: true, queued: true })
     } catch (err) {
       console.warn(`[webhook] QStash falhou, processando inline:`, err)
-      // cai no fallback abaixo
     }
   }
 
-  // FALLBACK (sem QStash): processa imediatamente, sem agrupar.
-  // Garante que o cliente sempre recebe resposta (sem o risco do setTimeout longo).
-  const { combinedContent } = await drainPending(sessionId)
-  if (!combinedContent.trim()) return NextResponse.json({ ok: true })
+  // FALLBACK (sem QStash): drena + extrai anexos + processa na hora.
   try {
-    await processIncomingMessage(inbox, ctx, combinedContent)
+    const { content, context } = await drainAndBuildContent(sessionId)
+    if (content.trim() && context) {
+      await processIncomingMessage(inbox, context, content)
+    }
   } catch (err) {
     console.error(`[webhook] inline process error:`, err)
   }

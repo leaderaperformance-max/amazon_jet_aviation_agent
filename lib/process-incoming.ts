@@ -12,6 +12,8 @@ import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
 import { validatePartNumber, extractPartNumbersFromText } from '@/lib/part-number'
 import { createLead } from '@/lib/leads'
 import { createPartsSheet } from '@/lib/google/sheets'
+import { drainPending } from '@/lib/debounce'
+import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import type { InboxConfig } from '@/lib/types'
 
 /**
@@ -29,6 +31,43 @@ export interface IncomingContext {
   chatId: string | null
   chatwootContactId: number | null
   labels: string[]
+  // Anexos (PDF/imagem/áudio/planilha) NÃO extraídos ainda — o worker extrai
+  // depois do debounce (em paralelo) pra não estourar o tempo do webhook.
+  attachments?: ChatwootAttachment[]
+}
+
+/**
+ * Drena todas as mensagens pendentes da sessão e, se houver anexos, extrai
+ * o texto de TODOS em paralelo (PDF/imagem/áudio/planilha) e concatena.
+ * Roda no worker (60s) — fora do webhook — pra aguentar PDFs pesados.
+ */
+export async function drainAndBuildContent(sessionId: string): Promise<{
+  content: string
+  context: IncomingContext | null
+  count: number
+}> {
+  const { combinedContent, context, attachments, ids } = await drainPending(sessionId)
+  let content = combinedContent
+  const atts = (attachments as ChatwootAttachment[] | undefined) ?? []
+
+  if (atts.length > 0) {
+    // Limita a 8 anexos pra evitar abuso; extrai em PARALELO (tempo = mais lento, não soma)
+    const results = await Promise.all(
+      atts.slice(0, 8).map(att =>
+        processAttachment(att).catch(err => {
+          console.warn('[drain] attachment extract error:', err)
+          return null
+        })
+      )
+    )
+    const extracted = results.filter((t): t is string => !!t)
+    if (extracted.length > 0) {
+      content = content ? `${content}\n\n${extracted.join('\n\n')}` : extracted.join('\n\n')
+    }
+    console.log(`[drain] ${sessionId}: extraídos ${extracted.length}/${atts.length} anexos`)
+  }
+
+  return { content, context: (context as IncomingContext | null), count: ids.length }
 }
 
 /**

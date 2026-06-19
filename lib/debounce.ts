@@ -40,7 +40,7 @@ export async function hasNewerPending(sessionId: string, after: string): Promise
 
 export async function drainPending(
   sessionId: string
-): Promise<{ ids: string[]; combinedContent: string; context: unknown }> {
+): Promise<{ ids: string[]; combinedContent: string; context: unknown; attachments: unknown[] }> {
   const supabase = getAdminClient()
 
   // Select all unprocessed for the session, mark them processed, combine.
@@ -67,8 +67,20 @@ export async function drainPending(
     if (updErr) throw updErr
   }
 
-  const combinedContent = sorted.map((r: { content: string }) => r.content).join('\n\n')
-  // Use the context from the LAST message (most up-to-date labels/sender)
+  // Junta só o texto (não-vazio) com separador
+  const combinedContent = sorted
+    .map((r: { content: string }) => r.content)
+    .filter((c: string) => c && c.trim())
+    .join('\n\n')
+
+  // Agrega anexos de TODAS as linhas (cada mensagem pode ter trazido PDFs)
+  const attachments: unknown[] = []
+  for (const r of sorted) {
+    const c = (r as { context?: { attachments?: unknown[] } }).context
+    if (c?.attachments && Array.isArray(c.attachments)) attachments.push(...c.attachments)
+  }
+
+  // Context da ÚLTIMA mensagem (labels/sender mais atuais)
   const context = sorted.length > 0 ? (sorted[sorted.length - 1] as { context: unknown }).context : null
-  return { ids, combinedContent, context }
+  return { ids, combinedContent, context, attachments }
 }
