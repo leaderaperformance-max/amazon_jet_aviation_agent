@@ -4,6 +4,27 @@ import { loadHistory, saveMessage } from '@/lib/memory'
 import { injectCurrentDate } from '@/lib/prompt'
 import type { MemoryMessage } from '@/lib/types'
 
+/**
+ * Detecta se a resposta do modelo AFIRMA que o lead foi enviado ao vendedor.
+ * gpt-4o-mini às vezes gera esse texto de fechamento SEM chamar envia_pn,
+ * o que faz o lead nunca ser criado (cliente ouve "dados enviados" e nada
+ * acontece). Quando isso é detectado e envia_pn não foi chamado, forçamos
+ * a tool (ver runAgent). Precisão alta: só pega frases de conclusão de envio.
+ */
+export function claimsLeadSent(text: string): boolean {
+  const t = text.toLowerCase()
+  return (
+    /dados enviados/.test(t) ||
+    /(enviei|encaminhei|mandei) (o |os |seu |seus |as )?(pedido|dados|informaç)/.test(t) ||
+    /vou enviar os dados/.test(t) ||
+    /recebi os dados/.test(t) ||
+    /especialista (vai|irá|ira|retorna|do aog|de )/.test(t) ||
+    /aog desk/.test(t) ||
+    /receber(á|a) a cotaç/.test(t) ||
+    /cotaç(ã|a)o em at(é|e)/.test(t)
+  )
+}
+
 export async function runAgent(
   sessionId: string,
   userMessage: string,
@@ -52,6 +73,31 @@ export async function runAgent(
   console.log(`[agent] totalToolCalls=${allToolCalls.length} steps=${steps.length} textLen=${text.length}`)
   if (allToolCalls.length > 0) {
     console.log(`[agent] toolCalls: ${allToolCalls.map(t => `${t.toolName}@step${t.step}`).join(', ')}`)
+  }
+
+  // ⚠️ SAFETY NET contra "phantom send": se a resposta afirma que o lead foi
+  // enviado mas envia_pn NÃO foi chamado, o lead nunca seria criado. Forçamos
+  // a tool via toolChoice — o modelo extrai PN/qtd/urgência do histórico e
+  // envia_pn cria o lead + notifica o vendedor. O texto de fechamento original
+  // (que prometeu o envio) volta pro cliente, agora verdadeiro.
+  const hasEnviaPnTool = !!tools && Object.prototype.hasOwnProperty.call(tools, 'envia_pn')
+  const calledEnviaPn = allToolCalls.some(t => t.toolName === 'envia_pn')
+  if (hasEnviaPnTool && !calledEnviaPn && claimsLeadSent(text)) {
+    console.warn(`[agent] ⚠️ PHANTOM SEND: resposta afirma envio mas envia_pn NÃO foi chamado. Forçando envia_pn...`)
+    try {
+      const forced = await generateText({
+        ...generateParams,
+        toolChoice: { type: 'tool', toolName: 'envia_pn' },
+        // 1 step = só a chamada forçada da tool (que executa e cria o lead).
+        // Evita um 2o step com toolChoice 'auto' que poderia duplicar o lead.
+        stopWhen: stepCountIs(1),
+      } as Parameters<typeof generateText>[0])
+      const forcedSteps = (forced as { steps?: Array<{ toolCalls?: Array<{ toolName?: string }> }> }).steps ?? []
+      const ok = forcedSteps.some(s => (s.toolCalls ?? []).some(tc => tc.toolName === 'envia_pn'))
+      console.log(`[agent] forced envia_pn → ${ok ? 'OK (lead criado)' : 'FALHOU (modelo não chamou mesmo forçado)'}`)
+    } catch (err) {
+      console.error(`[agent] forced envia_pn error:`, err)
+    }
   }
 
   await saveMessage(sessionId, 'user', userMessage)
