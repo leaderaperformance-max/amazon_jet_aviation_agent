@@ -31,3 +31,20 @@ export async function generateStageMessage(sessionId: string, stage: StageKey): 
   })
   return text.trim()
 }
+
+export function isItemDue(p: {
+  item: { status: string; start_in_step: number; contact: { identifier: string | null } }
+  lastMessageAtMs: number
+  thresholdSec: number
+  alreadySent: boolean
+  nowMs: number
+}): boolean {
+  if (p.item.status !== 'active') return false
+  if (!p.item.contact.identifier) return false
+  if (p.alreadySent) return false
+  const ageSec = p.nowMs / 1000 - p.item.start_in_step
+  if (ageSec < p.thresholdSec) return false
+  const inactiveSec = (p.nowMs - p.lastMessageAtMs) / 1000
+  if (inactiveSec < p.thresholdSec) return false
+  return true
+}
