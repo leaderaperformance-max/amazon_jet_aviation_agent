@@ -57,6 +57,14 @@ describe('runAgent', () => {
     expect(mockSaveMessage).toHaveBeenCalledWith('s', 'assistant', 'Resposta')
     expect(result).toBe('Resposta')
   })
+
+  it('saveUserMessage:false → não salva a msg do user, mas salva o assistant', async () => {
+    mockLoadHistory.mockResolvedValue([])
+    mockGenerate.mockResolvedValue({ text: 'resp' })
+    await runAgent('s', 'nudge interno', 'P', 'sk', 'gpt-4o-mini', undefined, [], { saveUserMessage: false })
+    expect(mockSaveMessage).not.toHaveBeenCalledWith('s', 'user', 'nudge interno')
+    expect(mockSaveMessage).toHaveBeenCalledWith('s', 'assistant', 'resp')
+  })
 })
 
 // Safety net: gpt-4o-mini às vezes gera o texto de fechamento ("Dados enviados")

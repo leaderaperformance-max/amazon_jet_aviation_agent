@@ -32,7 +32,8 @@ export async function runAgent(
   openaiApiKey: string,
   openaiModel: string,
   tools?: Record<string, unknown>,
-  currentLabels: string[] = []
+  currentLabels: string[] = [],
+  opts: { saveUserMessage?: boolean } = {},
 ): Promise<string> {
   const history: MemoryMessage[] = await loadHistory(sessionId)
   const messages = [...history, { role: 'user' as const, content: userMessage }]
@@ -100,7 +101,9 @@ export async function runAgent(
     }
   }
 
-  await saveMessage(sessionId, 'user', userMessage)
+  if (opts.saveUserMessage !== false) {
+    await saveMessage(sessionId, 'user', userMessage)
+  }
   await saveMessage(sessionId, 'assistant', text)
 
   return text
