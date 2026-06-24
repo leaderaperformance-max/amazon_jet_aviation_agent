@@ -15,6 +15,7 @@ import { createPartsSheet } from '@/lib/google/sheets'
 import { drainPending } from '@/lib/debounce'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import type { InboxConfig } from '@/lib/types'
+import { isQStashEnabled, scheduleSlaTakeover } from '@/lib/qstash'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -285,6 +286,16 @@ export async function processIncomingMessage(
   const hasAtendimentoIA = labels.includes(SYSTEM_LABEL)
   if (!hasAtendimentoIA && !wasNew) {
     console.log(`[process] handoff: humano assumiu conversation=${conversationId}`)
+    // SLA: se ninguém responder em N min, a IA assume (Parte B do spec)
+    const slaEnabled = (process.env.SLA_TAKEOVER_ENABLED ?? 'true') === 'true'
+    if (slaEnabled && isQStashEnabled()) {
+      const min = parseInt(process.env.SLA_TAKEOVER_MIN ?? '15', 10)
+      try {
+        await scheduleSlaTakeover(sessionId, new Date().toISOString(), min * 60, { conversationId, chatwootInboxId: ctx.chatwootInboxId })
+      } catch (err) {
+        console.warn(`[process] scheduleSlaTakeover falhou:`, err)
+      }
+    }
     return
   }
 
