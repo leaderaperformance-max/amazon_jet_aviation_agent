@@ -4,7 +4,7 @@ import { loadHistory, saveMessage } from '@/lib/memory'
 import { loadOpenAIConfig } from '@/lib/inboxes'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { sendMessage } from '@/lib/quepasa'
-import type { FunnelItem } from '@/lib/chatwoot/funnel'
+import { resolveFunnel, listFunnelItems, type ChatwootCfg, type FunnelItem } from '@/lib/chatwoot/funnel'
 
 export type StageKey = 'leads_novos' | 'orcamento_enviado' | 'venda_fechada'
 
@@ -94,4 +94,62 @@ export async function processFunnelItem(
   } catch (err) {
     return { sent: false, error: (err as Error).message }
   }
+}
+
+const STAGE_BY_SLOT: Record<'start' | 'middle' | 'end', StageKey> = {
+  start: 'leads_novos', middle: 'orcamento_enviado', end: 'venda_fechada',
+}
+
+function thresholdSecFor(stage: StageKey): number {
+  if (stage === 'leads_novos') return parseInt(process.env.FUNNEL_LEADS_NOVOS_HORAS ?? '24', 10) * 3600
+  if (stage === 'orcamento_enviado') return parseInt(process.env.FUNNEL_ORCAMENTO_HORAS ?? '24', 10) * 3600
+  return parseInt(process.env.FUNNEL_VENDA_FECHADA_DIAS ?? '15', 10) * 86_400
+}
+
+async function lastMessageAtMs(identifier: string): Promise<number> {
+  const db = getAdminClient()
+  const { data } = await db.from('contacts')
+    .select('last_message_at').eq('whatsapp_identifier', identifier).maybeSingle()
+  const ts = data?.last_message_at
+  return ts ? new Date(ts).getTime() : 0
+}
+
+export async function runFunnelAutomations(
+  cfg: ChatwootCfg,
+  inbox: { quepasa_host: string | null; quepasa_token: string | null },
+  identifier = process.env.FUNNEL_IDENTIFIER ?? 'amazon_jet_vendas',
+  nowMs: number = Date.now(),
+): Promise<{ resolved: boolean; checked: number; sent: number }> {
+  const funnel = await resolveFunnel(cfg, identifier)
+  if (!funnel) return { resolved: false, checked: 0, sent: 0 }
+
+  let checked = 0, sent = 0
+  for (const slot of ['start', 'middle', 'end'] as const) {
+    const stage = STAGE_BY_SLOT[slot]
+    const stepId = funnel.steps[slot]
+    const threshold = thresholdSecFor(stage)
+    const items = await listFunnelItems(cfg, funnel.funnelId, stepId)
+
+    for (const item of items) {
+      checked++
+      if (!item.contact.identifier) continue
+
+      let alreadySent: boolean
+      if (stage === 'venda_fechada') {
+        const last = await lastSentAt(item.id, stage)
+        alreadySent = last != null && (nowMs - last) < threshold * 1000
+      } else {
+        alreadySent = await wasAlreadySent(item.id, stage, item.start_in_step)
+      }
+
+      const lastMsg = await lastMessageAtMs(item.contact.identifier)
+      const due = isItemDue({ item, lastMessageAtMs: lastMsg, thresholdSec: threshold, alreadySent, nowMs })
+      if (!due) continue
+
+      const r = await processFunnelItem(item, stage, inbox)
+      if (r.sent) sent++
+      console.log(`[funnel] item=${item.id} stage=${stage} sent=${r.sent}${r.error ? ` err=${r.error}` : ''}`)
+    }
+  }
+  return { resolved: true, checked, sent }
 }
