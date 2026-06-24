@@ -1,19 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { scheduleSlaTakeover } from '@/lib/qstash'
-import { classifyActivitySince } from '@/lib/sla-takeover'
+import { classifyActivitySince, checkAndTakeover } from '@/lib/sla-takeover'
+import { runAgent } from '@/lib/agent'
 
-const { memRows, getAdminMock } = vi.hoisted(() => {
+const { memRows, contactBox, getAdminMock } = vi.hoisted(() => {
   const memRows: Array<{ message: { type: string; content: string }; created_at: string }> = []
-  const getAdminMock = vi.fn(() => ({
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      gt: vi.fn().mockResolvedValue({ data: memRows, error: null }),
-    })),
-  }))
-  return { memRows, getAdminMock }
+  const contactBox: { value: { id: string; current_labels: string[] } | null } = {
+    value: { id: 'c1', current_labels: [] },
+  }
+  const chain = () => {
+    const c: Record<string, unknown> = {}
+    c.select = vi.fn(() => c)
+    c.eq = vi.fn(() => c)
+    c.update = vi.fn(() => c)
+    c.gt = vi.fn(async () => ({ data: memRows, error: null }))
+    c.maybeSingle = vi.fn(async () => ({ data: contactBox.value, error: null }))
+    return c
+  }
+  const getAdminMock = vi.fn(() => ({ from: vi.fn(() => chain()) }))
+  return { memRows, contactBox, getAdminMock }
 })
 vi.mock('@/lib/supabase/admin', () => ({ getAdminClient: getAdminMock }))
+
+vi.mock('@/lib/inboxes', () => ({
+  loadInboxByChatwootId: vi.fn().mockResolvedValue({
+    id: 'ix', chatwoot_base_url: 'https://c', chatwoot_account_id: 14, chatwoot_user_token: 'tk',
+    quepasa_host: 'https://qp', quepasa_token: 't', system_prompt: 'P', enabled: true,
+  }),
+  loadOpenAIConfig: vi.fn().mockResolvedValue({ apiKey: 'sk', model: 'gpt-4o-mini' }),
+}))
+vi.mock('@/lib/tags', () => ({ addLabel: vi.fn().mockResolvedValue(['atendimento_ia']), removeLabel: vi.fn() }))
+vi.mock('@/lib/agent', () => ({ runAgent: vi.fn().mockResolvedValue('Oi, assumindo!') }))
+vi.mock('@/lib/quepasa', () => ({ sendMessage: vi.fn() }))
+vi.mock('@/lib/process-incoming', () => ({ buildAgentTools: vi.fn(() => ({ tools: {}, getLabels: () => [] })) }))
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -46,5 +65,24 @@ describe('classifyActivitySince', () => {
   })
   it('nada novo → silent', () => {
     expect(classifyActivitySince([])).toBe('silent')
+  })
+})
+
+describe('checkAndTakeover', () => {
+  it('NÃO assume se houve resposta', async () => {
+    memRows.length = 0
+    memRows.push({ message: { type: 'human', content: '[atendente]: ja respondi' }, created_at: 'x' })
+    const r = await checkAndTakeover({ sessionId: 's@x', sinceAt: '2026-06-24T00:00:00Z', conversationId: 100, chatwootInboxId: 45 })
+    expect(r.action).toBe('skipped_responded')
+    expect(runAgent).not.toHaveBeenCalled()
+  })
+
+  it('assume quando silencioso: roda agente com saveUserMessage:false', async () => {
+    memRows.length = 0
+    ;(runAgent as ReturnType<typeof vi.fn>).mockClear()
+    const r = await checkAndTakeover({ sessionId: 's@x', sinceAt: '2026-06-24T00:00:00Z', conversationId: 100, chatwootInboxId: 45 })
+    expect(r.action).toBe('took_over')
+    expect(runAgent).toHaveBeenCalled()
+    expect((runAgent as ReturnType<typeof vi.fn>).mock.calls[0][7]).toMatchObject({ saveUserMessage: false })
   })
 })
