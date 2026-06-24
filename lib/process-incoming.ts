@@ -71,52 +71,21 @@ export async function drainAndBuildContent(sessionId: string): Promise<{
 }
 
 /**
- * Full processing pipeline for a Contact message (or combined batch).
- * Extracted from the webhook so it can run either inline OR from the
- * QStash-backed debounce worker (/api/process-pending).
+ * Builds the agent tool-set for a conversation, encapsulating label mutation.
+ * Extracted so the same tools can be reused outside processIncomingMessage
+ * (e.g. during a takeover flow) without duplicating logic.
  */
-export async function processIncomingMessage(
-  inbox: InboxConfig,
-  ctx: IncomingContext,
-  content: string,
-): Promise<void> {
-  const {
-    conversationId, sessionId, senderName, senderPhone, senderIdent,
-    chatId, chatwootContactId, labels,
-  } = ctx
-
-  // Upsert contact
-  const { contact, wasNew } = await upsertContact({
-    inbox_id: inbox.id,
-    chatwoot_conversation_id: conversationId,
-    chatwoot_contact_id: chatwootContactId,
-    name: senderName ?? null,
-    phone_number: senderPhone ?? null,
-    whatsapp_identifier: senderIdent ?? null,
-    current_labels: labels,
-    last_message: content,
-    last_message_at: new Date().toISOString(),
-  })
-
-  // Save the (combined) customer message to memory
-  await saveMessage(sessionId, 'user', content)
-
-  // Decide if bot should respond: skip if a human took over and it's not new
-  const hasAtendimentoIA = labels.includes(SYSTEM_LABEL)
-  if (!hasAtendimentoIA && !wasNew) {
-    console.log(`[process] handoff: humano assumiu conversation=${conversationId}`)
-    return
-  }
-
-  const useQuepasa = !!(inbox.quepasa_host && inbox.quepasa_token)
-  console.log(`[process] inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA} outbound=${useQuepasa ? 'quepasa' : 'chatwoot'}`)
-
-  let labelsState: string[] = [...labels]
-  const chatwootCfg = {
-    baseUrl: inbox.chatwoot_base_url,
-    accountId: inbox.chatwoot_account_id,
-    userToken: inbox.chatwoot_user_token,
-  }
+export function buildAgentTools(params: {
+  inbox: InboxConfig
+  conversationId: number
+  contactId: string
+  senderName: string | null
+  senderPhone: string | null
+  chatwootCfg: { baseUrl: string; accountId: number; userToken: string }
+  initialLabels: string[]
+}): { tools: Record<string, unknown>; getLabels: () => string[] } {
+  const { inbox, conversationId, contactId, senderName, senderPhone, chatwootCfg } = params
+  let labelsState = [...params.initialLabels]
   const labelEnum = z.enum(BUSINESS_LABELS)
 
   const tools = {
@@ -125,7 +94,7 @@ export async function processIncomingMessage(
       inputSchema: z.object({ label: labelEnum }),
       execute: async ({ label }: { label: typeof BUSINESS_LABELS[number] }) => {
         labelsState = await addLabel(chatwootCfg, conversationId, labelsState, label)
-        await updateContactLabels(contact.id, labelsState)
+        await updateContactLabels(contactId, labelsState)
         return { ok: true, labels: labelsState }
       },
     }),
@@ -134,7 +103,7 @@ export async function processIncomingMessage(
       inputSchema: z.object({ label: labelEnum }),
       execute: async ({ label }: { label: typeof BUSINESS_LABELS[number] }) => {
         labelsState = await removeLabel(chatwootCfg, conversationId, labelsState, label)
-        await updateContactLabels(contact.id, labelsState)
+        await updateContactLabels(contactId, labelsState)
         return { ok: true, labels: labelsState }
       },
     }),
@@ -183,7 +152,7 @@ export async function processIncomingMessage(
         const leadIds: string[] = []
         for (const item of args.items) {
           const lead = await createLead({
-            contact_id: contact.id,
+            contact_id: contactId,
             part_number: item.part_number,
             quantity: item.quantity,
             urgency: args.urgency,
@@ -271,17 +240,72 @@ export async function processIncomingMessage(
         }
 
         labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
-        await updateContactLabels(contact.id, labelsState)
+        await updateContactLabels(contactId, labelsState)
 
         return { ok: true, lead_ids: leadIds, count: args.items.length, sheet_url: sheetUrl }
       },
     }),
   }
 
+  return { tools, getLabels: () => labelsState }
+}
+
+/**
+ * Full processing pipeline for a Contact message (or combined batch).
+ * Extracted from the webhook so it can run either inline OR from the
+ * QStash-backed debounce worker (/api/process-pending).
+ */
+export async function processIncomingMessage(
+  inbox: InboxConfig,
+  ctx: IncomingContext,
+  content: string,
+): Promise<void> {
+  const {
+    conversationId, sessionId, senderName, senderPhone, senderIdent,
+    chatId, chatwootContactId, labels,
+  } = ctx
+
+  // Upsert contact
+  const { contact, wasNew } = await upsertContact({
+    inbox_id: inbox.id,
+    chatwoot_conversation_id: conversationId,
+    chatwoot_contact_id: chatwootContactId,
+    name: senderName ?? null,
+    phone_number: senderPhone ?? null,
+    whatsapp_identifier: senderIdent ?? null,
+    current_labels: labels,
+    last_message: content,
+    last_message_at: new Date().toISOString(),
+  })
+
+  // Save the (combined) customer message to memory
+  await saveMessage(sessionId, 'user', content)
+
+  // Decide if bot should respond: skip if a human took over and it's not new
+  const hasAtendimentoIA = labels.includes(SYSTEM_LABEL)
+  if (!hasAtendimentoIA && !wasNew) {
+    console.log(`[process] handoff: humano assumiu conversation=${conversationId}`)
+    return
+  }
+
+  const useQuepasa = !!(inbox.quepasa_host && inbox.quepasa_token)
+  console.log(`[process] inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA} outbound=${useQuepasa ? 'quepasa' : 'chatwoot'}`)
+
+  const chatwootCfg = {
+    baseUrl: inbox.chatwoot_base_url,
+    accountId: inbox.chatwoot_account_id,
+    userToken: inbox.chatwoot_user_token,
+  }
+
+  const { tools, getLabels } = buildAgentTools({
+    inbox, conversationId, contactId: contact.id,
+    senderName, senderPhone, chatwootCfg, initialLabels: labels,
+  })
+
   const openai = await loadOpenAIConfig()
   const reply = await runAgent(
     sessionId, content, inbox.system_prompt,
-    openai.apiKey, openai.model, tools, labelsState,
+    openai.apiKey, openai.model, tools, getLabels(),
   )
   console.log(`[process] replyLen=${reply.length}`)
 
@@ -296,7 +320,7 @@ export async function processIncomingMessage(
   }
 
   if (!hasAtendimentoIA) {
-    labelsState = await addLabel(chatwootCfg, conversationId, labelsState, SYSTEM_LABEL)
-    await updateContactLabels(contact.id, labelsState)
+    const finalLabels = await addLabel(chatwootCfg, conversationId, getLabels(), SYSTEM_LABEL)
+    await updateContactLabels(contact.id, finalLabels)
   }
 }
