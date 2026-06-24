@@ -5,7 +5,21 @@ vi.mock('@ai-sdk/openai', () => ({ createOpenAI: vi.fn(() => (m: string) => `moc
 vi.mock('@/lib/memory', () => ({ loadHistory: vi.fn().mockResolvedValue([]), saveMessage: vi.fn() }))
 vi.mock('@/lib/inboxes', () => ({ loadOpenAIConfig: vi.fn().mockResolvedValue({ apiKey: 'sk', model: 'gpt-4o-mini' }) }))
 
-import { generateStageMessage, STAGE_PROMPTS, isItemDue } from '@/lib/funnel-automations'
+const { insertMock, getAdminMock } = vi.hoisted(() => {
+  const insertMock = vi.fn().mockResolvedValue({ error: null })
+  const selectChain = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+  }
+  const getAdminMock = vi.fn(() => ({ from: vi.fn(() => ({ insert: insertMock, ...selectChain })) }))
+  return { insertMock, getAdminMock }
+})
+vi.mock('@/lib/supabase/admin', () => ({ getAdminClient: getAdminMock }))
+vi.mock('@/lib/quepasa', () => ({ sendMessage: vi.fn().mockResolvedValue(undefined) }))
+
+import { generateStageMessage, STAGE_PROMPTS, isItemDue, processFunnelItem } from '@/lib/funnel-automations'
 import { generateText } from 'ai'
 
 const mockGen = generateText as ReturnType<typeof vi.fn>
@@ -54,5 +68,16 @@ describe('isItemDue', () => {
   })
   it('não dispara sem identifier', () => {
     expect(isItemDue({ ...base, item: { ...base.item, contact: { identifier: null } } })).toBe(false)
+  })
+})
+
+describe('processFunnelItem', () => {
+  it('gera msg, envia via quepasa e grava dedup', async () => {
+    mockGen.mockResolvedValue({ text: 'Oi, seguimos buscando!' })
+    const item = { id: 286, funnel_step_id: 34, start_in_step: 1, amount: '0.0', status: 'active', label_list: [], contact: { identifier: '55x@s.whatsapp.net', phone_number: '+55x', name: 'Leo' }, conversation: { id: 1, display_id: 100, inbox_id: 45 } }
+    const inbox = { quepasa_host: 'https://qp', quepasa_token: 't' }
+    const r = await processFunnelItem(item as never, 'leads_novos', inbox as never)
+    expect(r.sent).toBe(true)
+    expect(insertMock).toHaveBeenCalled()
   })
 })

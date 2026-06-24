@@ -1,7 +1,10 @@
 import { generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
-import { loadHistory } from '@/lib/memory'
+import { loadHistory, saveMessage } from '@/lib/memory'
 import { loadOpenAIConfig } from '@/lib/inboxes'
+import { getAdminClient } from '@/lib/supabase/admin'
+import { sendMessage } from '@/lib/quepasa'
+import type { FunnelItem } from '@/lib/chatwoot/funnel'
 
 export type StageKey = 'leads_novos' | 'orcamento_enviado' | 'venda_fechada'
 
@@ -47,4 +50,48 @@ export function isItemDue(p: {
   const inactiveSec = (p.nowMs - p.lastMessageAtMs) / 1000
   if (inactiveSec < p.thresholdSec) return false
   return true
+}
+
+export async function wasAlreadySent(itemId: number, type: StageKey, startInStep: number): Promise<boolean> {
+  const db = getAdminClient()
+  const { data } = await db.from('funnel_automations_sent')
+    .select('id').eq('funnel_item_id', itemId).eq('automation_type', type)
+    .eq('start_in_step', startInStep).limit(1)
+  return (data?.length ?? 0) > 0
+}
+
+export async function lastSentAt(itemId: number, type: StageKey): Promise<number | null> {
+  const db = getAdminClient()
+  const { data } = await db.from('funnel_automations_sent')
+    .select('sent_at').eq('funnel_item_id', itemId).eq('automation_type', type)
+    .order('sent_at', { ascending: false }).limit(1)
+  const ts = data?.[0]?.sent_at
+  return ts ? new Date(ts).getTime() : null
+}
+
+export async function processFunnelItem(
+  item: FunnelItem, stage: StageKey,
+  inbox: { quepasa_host: string | null; quepasa_token: string | null },
+): Promise<{ sent: boolean; error?: string; message?: string }> {
+  const sessionId = item.contact.identifier
+  if (!sessionId) return { sent: false, error: 'no identifier' }
+  if (!inbox.quepasa_host || !inbox.quepasa_token) return { sent: false, error: 'no quepasa' }
+
+  try {
+    const message = await generateStageMessage(sessionId, stage)
+    if (!message || message.length < 5) return { sent: false, error: 'empty message' }
+
+    const recipient = sessionId.replace(/[^\d]/g, '')
+    await sendMessage({ host: inbox.quepasa_host, token: inbox.quepasa_token }, recipient, message)
+    await saveMessage(sessionId, 'assistant', message)
+
+    const db = getAdminClient()
+    await db.from('funnel_automations_sent').insert({
+      funnel_item_id: item.id, conversation_id: item.conversation.display_id,
+      automation_type: stage, start_in_step: item.start_in_step, message,
+    })
+    return { sent: true, message }
+  } catch (err) {
+    return { sent: false, error: (err as Error).message }
+  }
 }
