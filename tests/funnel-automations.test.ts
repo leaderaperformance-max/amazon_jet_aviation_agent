@@ -5,21 +5,22 @@ vi.mock('@ai-sdk/openai', () => ({ createOpenAI: vi.fn(() => (m: string) => `moc
 vi.mock('@/lib/memory', () => ({ loadHistory: vi.fn().mockResolvedValue([]), saveMessage: vi.fn() }))
 vi.mock('@/lib/inboxes', () => ({ loadOpenAIConfig: vi.fn().mockResolvedValue({ apiKey: 'sk', model: 'gpt-4o-mini' }) }))
 
-const { insertMock, getAdminMock } = vi.hoisted(() => {
+const { insertMock, getAdminMock, dbResult } = vi.hoisted(() => {
   const insertMock = vi.fn().mockResolvedValue({ error: null })
+  const dbResult = { value: { data: [] as unknown[], error: null as null | { message: string } } }
   const selectChain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+    limit: vi.fn().mockImplementation(async () => dbResult.value),
   }
   const getAdminMock = vi.fn(() => ({ from: vi.fn(() => ({ insert: insertMock, ...selectChain })) }))
-  return { insertMock, getAdminMock }
+  return { insertMock, getAdminMock, dbResult }
 })
 vi.mock('@/lib/supabase/admin', () => ({ getAdminClient: getAdminMock }))
 vi.mock('@/lib/quepasa', () => ({ sendMessage: vi.fn().mockResolvedValue(undefined) }))
 
-import { generateStageMessage, STAGE_PROMPTS, isItemDue, processFunnelItem } from '@/lib/funnel-automations'
+import { generateStageMessage, STAGE_PROMPTS, isItemDue, processFunnelItem, wasAlreadySent } from '@/lib/funnel-automations'
 import { generateText } from 'ai'
 
 const mockGen = generateText as ReturnType<typeof vi.fn>
@@ -79,5 +80,14 @@ describe('processFunnelItem', () => {
     const r = await processFunnelItem(item as never, 'leads_novos', inbox as never)
     expect(r.sent).toBe(true)
     expect(insertMock).toHaveBeenCalled()
+  })
+})
+
+describe('dedup fail-closed', () => {
+  it('wasAlreadySent → true quando o banco erra', async () => {
+    dbResult.value = { data: null as unknown as unknown[], error: { message: 'boom' } }
+    const r = await wasAlreadySent(1, 'leads_novos', 1)
+    expect(r).toBe(true)
+    dbResult.value = { data: [], error: null } // reset
   })
 })

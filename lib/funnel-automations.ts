@@ -54,17 +54,25 @@ export function isItemDue(p: {
 
 export async function wasAlreadySent(itemId: number, type: StageKey, startInStep: number): Promise<boolean> {
   const db = getAdminClient()
-  const { data } = await db.from('funnel_automations_sent')
+  const { data, error } = await db.from('funnel_automations_sent')
     .select('id').eq('funnel_item_id', itemId).eq('automation_type', type)
     .eq('start_in_step', startInStep).limit(1)
+  if (error) {
+    console.warn(`[funnel] wasAlreadySent erro (fail-closed, pula item):`, error.message)
+    return true
+  }
   return (data?.length ?? 0) > 0
 }
 
 export async function lastSentAt(itemId: number, type: StageKey): Promise<number | null> {
   const db = getAdminClient()
-  const { data } = await db.from('funnel_automations_sent')
+  const { data, error } = await db.from('funnel_automations_sent')
     .select('sent_at').eq('funnel_item_id', itemId).eq('automation_type', type)
     .order('sent_at', { ascending: false }).limit(1)
+  if (error) {
+    console.warn(`[funnel] lastSentAt erro (fail-closed, trata como recém-enviado):`, error.message)
+    return Date.now()
+  }
   const ts = data?.[0]?.sent_at
   return ts ? new Date(ts).getTime() : null
 }
@@ -86,10 +94,11 @@ export async function processFunnelItem(
     await saveMessage(sessionId, 'assistant', message)
 
     const db = getAdminClient()
-    await db.from('funnel_automations_sent').insert({
+    const { error: insErr } = await db.from('funnel_automations_sent').insert({
       funnel_item_id: item.id, conversation_id: item.conversation.display_id,
       automation_type: stage, start_in_step: item.start_in_step, message,
     })
+    if (insErr) console.warn(`[funnel] dedup insert falhou (risco de repetir):`, insErr.message)
     return { sent: true, message }
   } catch (err) {
     return { sent: false, error: (err as Error).message }
