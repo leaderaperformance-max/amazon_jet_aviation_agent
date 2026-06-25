@@ -288,7 +288,7 @@ export async function processIncomingMessage(
     console.log(`[process] handoff: humano assumiu conversation=${conversationId}`)
     // SLA: se ninguém responder em N min, a IA assume (Parte B do spec)
     const slaEnabled = (process.env.SLA_TAKEOVER_ENABLED ?? 'true') === 'true'
-    if (slaEnabled && isQStashEnabled()) {
+    if (slaEnabled && isQStashEnabled() && !!inbox.quepasa_host && !!inbox.quepasa_token) {
       const min = parseInt(process.env.SLA_TAKEOVER_MIN ?? '15', 10)
       try {
         await scheduleSlaTakeover(sessionId, new Date().toISOString(), min * 60, { conversationId, chatwootInboxId: ctx.chatwootInboxId })

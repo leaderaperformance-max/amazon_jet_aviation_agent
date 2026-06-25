@@ -23,3 +23,10 @@ it('handoff (sem atendimento_ia, não novo) → agenda SLA takeover e NÃO respo
   await processIncomingMessage(inbox as never, ctx as never, 'oi tem essa peça?')
   expect(scheduleSla).toHaveBeenCalledWith('s@x', expect.any(String), 900, { conversationId: 100, chatwootInboxId: 45 })
 })
+
+it('inbox sem QuePasa (canal não-WhatsApp) → NÃO agenda SLA', async () => {
+  const inbox = { id: 'ix', system_prompt: 'P', quepasa_host: null, quepasa_token: null, chatwoot_base_url: 'b', chatwoot_account_id: 14, chatwoot_user_token: 'tk' }
+  const ctx = { chatwootInboxId: 49, conversationId: 200, sessionId: 'chatwoot-conv-200', senderName: null, senderPhone: null, senderIdent: null, chatId: null, chatwootContactId: 2, labels: [] }
+  await processIncomingMessage(inbox as never, ctx as never, 'oi pelo site')
+  expect(scheduleSla).not.toHaveBeenCalled()
+})
