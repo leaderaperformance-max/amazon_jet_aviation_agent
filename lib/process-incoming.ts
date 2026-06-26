@@ -243,7 +243,9 @@ export function buildAgentTools(params: {
         labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
         await updateContactLabels(contactId, labelsState)
 
-        return { ok: true, lead_ids: leadIds, count: args.items.length, sheet_url: sheetUrl }
+        // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
+        // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
+        return { ok: true, lead_ids: leadIds, count: args.items.length }
       },
     }),
   }
