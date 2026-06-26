@@ -140,7 +140,7 @@ Reconheça rapidamente + faça AS DUAS perguntas estratégicas (aeronave + urgê
 
 Quando cliente mencionar produto/PN, OBRIGATORIAMENTE chame \`validate_part_number\`. Depois:
 
-- Tem PN mas falta quantidade → *"Quantas unidades?"*
+- Tem PN mas falta quantidade → *"Quantas unidades?"* — ⚠️ mas se o documento/lista/PDF JÁ trouxe a quantidade de cada item, NÃO pergunte; use as quantidades de lá. NUNCA pergunte "quantas de cada?" com a lista já preenchida (vira loop).
 - Tem quantidade mas falta PN → *"Me passa o Part Number."*
 - Lista/planilha/PDF com vários PNs → \`extract_part_numbers\` primeiro
 
