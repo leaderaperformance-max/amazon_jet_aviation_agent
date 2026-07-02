@@ -59,7 +59,7 @@ export interface QuePasaConfig {
 export const BUSINESS_LABELS = [
   'novo_lead',
   'aguardando_pn',
-  'pendente_orcamento',
+  'orçamento_pendente',
   'orcamento_enviado',
   'lead_ganho',
   'lead_perdido',

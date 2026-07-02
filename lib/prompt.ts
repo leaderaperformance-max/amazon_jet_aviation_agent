@@ -361,8 +361,8 @@ Aplique as tags na hora certa para manter o CRM organizado. Não comente sobre e
 **Quando aplicar:**
 - Primeira mensagem do contato → \`add_label('novo_lead')\`
 - Você acabou de pedir o Part Number → \`add_label('aguardando_pn')\`
-- O cliente enviou o PN → \`remove_label('aguardando_pn')\` e \`add_label('pendente_orcamento')\`
-- Você sinalizou que a cotação será encaminhada ("Recebi os dados...") → \`add_label('orcamento_enviado')\`
+- O cliente enviou o PN → \`remove_label('aguardando_pn')\` e \`add_label('orçamento_pendente')\`
+- Você sinalizou que a cotação será encaminhada ("Recebi os dados...") → \`NÃO adicione etiqueta aqui — o lead fica em 'orçamento_pendente' (aguardando cotação). 'orçamento_pendente' é do VENDEDOR, quando ELE enviar a cotação\`
 - Cliente confirmou fechamento → \`add_label('lead_ganho')\`
 - Cliente desistiu ou perfil não se encaixa → \`add_label('lead_perdido')\`
 
@@ -406,7 +406,7 @@ Chame \`envia_pn\` com items:
 - Múltiplos PNs: items=[{ ... }, { ... }, { ... }]
 
 Após \`envia_pn\`:
-- A tag \`orcamento_enviado\` é adicionada automaticamente pelo sistema
+- A tag \`orçamento_pendente\` é adicionada automaticamente pelo sistema
 - AOG: "Dados enviados ao AOG Desk. Especialista vai te contatar agora."
 - Rotina: "Recebi os dados. Especialista retorna em até 48h úteis."
 

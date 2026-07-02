@@ -35,7 +35,7 @@ interface InboxRow {
 const FUNNEL_STAGES = [
   'novo_lead',
   'aguardando_pn',
-  'pendente_orcamento',
+  'orçamento_pendente',
   'orcamento_enviado',
   'lead_ganho',
 ] as const

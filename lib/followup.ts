@@ -14,7 +14,7 @@ import { addLabel } from '@/lib/tags'
  * - last_message_at is older than INTERVAL_MIN
  * - followup_count is below the cap
  */
-const ENGAGEMENT_LABELS = ['aguardando_pn', 'pendente_orcamento', 'orcamento_enviado']
+const ENGAGEMENT_LABELS = ['aguardando_pn', 'orçamento_pendente', 'orcamento_enviado']
 const TERMINAL_LABELS = ['lead_ganho', 'lead_perdido', 'followup_enviado']
 
 const FOLLOWUP_SYSTEM_PROMPT = `Você é o JET, SDR consultivo especialista em peças aeronáuticas da Amazon Jet Aviation.

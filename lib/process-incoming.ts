@@ -240,7 +240,7 @@ export function buildAgentTools(params: {
           console.warn(`[envia_pn] seller_phone or QuePasa fallback not available for inbox ${inbox.id}`)
         }
 
-        labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orcamento_enviado')
+        labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
         await updateContactLabels(contactId, labelsState)
 
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno

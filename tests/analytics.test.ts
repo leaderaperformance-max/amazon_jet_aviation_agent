@@ -82,7 +82,7 @@ describe('computeAnalytics', () => {
 
   it('computa funil de conversão com taxas entre estágios', async () => {
     const contacts = [
-      { id: '1', inbox_id: 'i', current_labels: ['novo_lead', 'aguardando_pn', 'pendente_orcamento'], status: 'ia', message_count: 1, first_seen_at: '2026-05-10', last_message_at: '2026-05-10', name: '', phone_number: '' },
+      { id: '1', inbox_id: 'i', current_labels: ['novo_lead', 'aguardando_pn', 'orçamento_pendente'], status: 'ia', message_count: 1, first_seen_at: '2026-05-10', last_message_at: '2026-05-10', name: '', phone_number: '' },
       { id: '2', inbox_id: 'i', current_labels: ['novo_lead', 'aguardando_pn'], status: 'ia', message_count: 1, first_seen_at: '2026-05-10', last_message_at: '2026-05-10', name: '', phone_number: '' },
       { id: '3', inbox_id: 'i', current_labels: ['novo_lead'], status: 'ia', message_count: 1, first_seen_at: '2026-05-10', last_message_at: '2026-05-10', name: '', phone_number: '' },
     ]
