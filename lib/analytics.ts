@@ -40,7 +40,9 @@ const FUNNEL_STAGES = [
   'lead_ganho',
 ] as const
 
-const ALL_TAGS = [...BUSINESS_LABELS, 'atendimento_ia']
+// orcamento_enviado é etiqueta do vendedor (a IA não adiciona), mas ainda
+// conta nas métricas — por isso entra aqui explicitamente, fora do enum.
+const ALL_TAGS = [...BUSINESS_LABELS, 'atendimento_ia', 'orcamento_enviado']
 
 function pctDelta(curr: number, prev: number): number {
   if (prev === 0) return curr === 0 ? 0 : 1

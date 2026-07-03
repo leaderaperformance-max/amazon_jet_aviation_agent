@@ -60,7 +60,9 @@ export const BUSINESS_LABELS = [
   'novo_lead',
   'aguardando_pn',
   'orçamento_pendente',
-  'orcamento_enviado',
+  // 'orcamento_enviado' NÃO fica aqui de propósito: é etiqueta do VENDEDOR
+  // (quando ELE envia a cotação). Fora do enum, a IA fica IMPOSSIBILITADA de
+  // adicionar via add_label — não depende do modelo obedecer o prompt.
   'lead_ganho',
   'lead_perdido',
 ] as const
