@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { findFollowupCandidates, processFollowup } from '@/lib/followup'
 
 /**
  * GET /api/cron/followup
@@ -29,27 +28,14 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 export async function GET(req: NextRequest) {
+  // ⚠️ DESATIVADO. O follow-up antigo re-gravava a lista INTEIRA de etiquetas da
+  // conversa ao adicionar 'followup_enviado' — ressuscitando 'orcamento_enviado'
+  // (etiqueta só do vendedor) e às vezes apagando 'orçamento_pendente'. Foi
+  // substituído pelas automações do funil (/api/cron/funnel-automations), que
+  // NÃO mexem em etiqueta. Mantido como no-op pro cron-job.org antigo não quebrar.
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
-
-  const interval = parseInt(process.env.FOLLOWUP_INTERVAL_MINUTES ?? '2880', 10)
-  const maxPer = parseInt(process.env.FOLLOWUP_MAX_PER_CONTACT ?? '1', 10)
-
-  const candidates = await findFollowupCandidates(interval, maxPer)
-  console.log(`[cron/followup] interval=${interval}min maxPer=${maxPer} candidates=${candidates.length}`)
-
-  const results = []
-  for (const c of candidates) {
-    const r = await processFollowup(c)
-    console.log(`[cron/followup] contact=${c.id} sent=${r.sent}${r.error ? ` err=${r.error}` : ''}`)
-    results.push(r)
-  }
-
-  return NextResponse.json({
-    interval_minutes: interval,
-    candidates: candidates.length,
-    sent: results.filter(r => r.sent).length,
-    results,
-  })
+  console.log('[cron/followup] DESATIVADO (no-op). Use /api/cron/funnel-automations.')
+  return NextResponse.json({ ok: true, disabled: true, use: '/api/cron/funnel-automations' })
 }
