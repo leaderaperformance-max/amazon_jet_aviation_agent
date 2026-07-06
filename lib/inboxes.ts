@@ -14,6 +14,10 @@ export async function loadInboxByChatwootId(chatwootInboxId: number): Promise<In
 }
 
 export async function loadOpenAIConfig(): Promise<OpenAIConfig> {
+  // Segurança: a chave é lida PRIMEIRO da env var (OPENAI_API_KEY) — lugar seguro
+  // pra secrets. O banco (app_settings) é só fallback. O model segue do banco.
+  const envKey = process.env.OPENAI_API_KEY?.trim()
+
   const supabase = getAdminClient()
   const { data, error } = await supabase
     .from('app_settings')
@@ -22,7 +26,9 @@ export async function loadOpenAIConfig(): Promise<OpenAIConfig> {
     .maybeSingle()
 
   if (error) throw error
-  if (!data?.openai_api_key) throw new Error('OpenAI API key não configurada')
 
-  return { apiKey: data.openai_api_key, model: data.openai_model ?? 'gpt-4o-mini' }
+  const apiKey = envKey || data?.openai_api_key
+  if (!apiKey) throw new Error('OpenAI API key não configurada (defina OPENAI_API_KEY na Vercel)')
+
+  return { apiKey, model: data?.openai_model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini' }
 }

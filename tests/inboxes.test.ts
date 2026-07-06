@@ -49,7 +49,26 @@ describe('loadInboxByChatwootId', () => {
 })
 
 describe('loadOpenAIConfig', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.OPENAI_API_KEY })
+
+  it('prefere a env var OPENAI_API_KEY (mais segura) ao banco', async () => {
+    process.env.OPENAI_API_KEY = 'sk-env'
+    mockGetAdminClient.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { openai_api_key: 'sk-db', openai_model: 'gpt-4o-mini' },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    })
+    const result = await loadOpenAIConfig()
+    expect(result.apiKey).toBe('sk-env')
+    delete process.env.OPENAI_API_KEY
+  })
 
   it('retorna apiKey e model do app_settings', async () => {
     mockGetAdminClient.mockReturnValue({
