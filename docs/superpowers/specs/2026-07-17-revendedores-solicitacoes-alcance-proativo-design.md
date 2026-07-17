@@ -20,6 +20,7 @@ Três partes, construídas **em cima da máquina `quote_sessions`** que já exis
 - **Parte 1 — Detecção de revendedor + confirmação do cliente.** Lista de números cadastrados. Mensagem vinda de um número da lista = revendedor encaminhando. A IA coleta e **confirma nome + número do cliente final** antes de qualquer disparo.
 - **Parte 2 — Solicitações anti-duplicação com ID.** Cada solicitação tem um **ID único sequencial (`#0001`…)**, é **chaveada pelo número do cliente final**, e o disparo no grupo obedece: manda **1 vez**, atualização manda a **lista completa nova 1 vez**, repetição idêntica **pergunta** se é nova ou a mesma.
 - **Parte 3 — Alcance proativo ao cliente.** No caso do revendedor, assim que o cliente é confirmado, a IA **cria contato+conversa no Chatwoot** pro número do cliente e manda uma **mensagem cordial citando o consultor**, além de **semear o contexto na memória** pra atender bem quando o cliente responder.
+- **Parte 4 — Card no Kanban (funil).** No fluxo do revendedor, a etiqueta de qualificação (`orçamento_pendente`) é posta na conversa do **CLIENTE** (não do revendedor) — a automação de etiqueta→card do próprio Chatwoot cria o card no estágio certo. Conforme a conversa do cliente evolui, as etiquetas normais da IA movem o card pelos estágios. Uma etiqueta só (trava das solicitações) = **um card só**, sem duplicar.
 
 ### Princípio central (híbrido IA + banco)
 
@@ -236,4 +237,4 @@ Não gravamos "instrução interna" crua como mensagem de chat (evita a IA repap
 - UI de cadastro de consultores (é insert manual no banco por ora).
 - Relatórios/dashboard de solicitações.
 - Vídeo (explicitamente ignorado; outras mídias seguem o fluxo normal).
-- Sincronizar solicitação ↔ card do Kanban (as automações de etiqueta já existentes cuidam do funil).
+- Criar o card do Kanban **pelo código** (Parte 4 usa a automação de etiqueta→card já existente do Chatwoot; o código só garante que a etiqueta caia na conversa do cliente).
