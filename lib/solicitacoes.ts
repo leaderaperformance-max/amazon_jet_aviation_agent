@@ -103,7 +103,15 @@ export async function openSolicitacao(input: OpenSolicitacaoInput): Promise<Soli
     reseller_name: input.resellerName ?? null,
     reseller_phone: input.resellerPhone ?? null,
   }).select().single()
-  if (error) throw error
+  if (error) {
+    // Corrida no índice único uq_solicitacao_aberta: outro processo abriu a solicitação
+    // ao mesmo tempo. Relê a aberta que ele criou em vez de estourar.
+    if ((error as { code?: string }).code === '23505') {
+      const existing = await getOpenSolicitacao(input.clientPhone)
+      if (existing) return existing
+    }
+    throw error
+  }
   return data as Solicitacao
 }
 

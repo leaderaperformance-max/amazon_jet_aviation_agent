@@ -54,4 +54,14 @@ describe('openSolicitacao', () => {
     expect(s.numero).toBe(7)
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ client_phone: '55', origin_session_id: '55' }))
   })
+
+  it('corrida no índice único (23505) → relê a aberta que o outro processo criou', async () => {
+    const single = vi.fn().mockResolvedValue({ data: null, error: { code: '23505' } })
+    const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) })
+    const existing = { ...fresh, id: 's-existing', numero: 9, updated_at: new Date().toISOString() }
+    const getOpenChain = selectChain(existing) // reusa a chain de getOpenSolicitacao
+    mockGet.mockReturnValue({ from: vi.fn().mockReturnValue({ insert, ...getOpenChain }) })
+    const s = await openSolicitacao({ clientPhone: '55', originSessionId: '55' })
+    expect(s.id).toBe('s-existing')
+  })
 })
