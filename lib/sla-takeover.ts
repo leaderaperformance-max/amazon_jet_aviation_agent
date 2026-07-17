@@ -58,6 +58,7 @@ export async function checkAndTakeover(p: {
     const { tools, getLabels } = buildAgentTools({
       inbox, conversationId: p.conversationId, contactId: contact.id,
       senderName: null, senderPhone: null, chatwootCfg, initialLabels: labels,
+      sessionId: p.sessionId, reseller: null,
     })
     const openai = await loadOpenAIConfig()
     const reply = await runAgent(
