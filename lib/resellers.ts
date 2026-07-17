@@ -1,19 +1,20 @@
 import { getAdminClient } from '@/lib/supabase/admin'
-import { toBrazilWhatsApp } from '@/lib/phone'
+import { normalizePhone, toBrazilWhatsApp } from '@/lib/phone'
 
 /**
- * Retorna { name } do consultor se o número estiver cadastrado e ativo, senão null.
- * Usa o número canonicalizado (55 + DDD + 9) — cadastre os revendedores nesse formato.
+ * Retorna { name } do consultor se o número bater com algum cadastrado e ativo.
+ * Casa tanto a forma canônica (55 + DDD + 9) quanto os dígitos crus — robusto ao
+ * formato que o gateway entrega (com ou sem DDI). Cadastre os revendedores na forma canônica.
  */
 export async function findReseller(rawPhone: string | null | undefined): Promise<{ name: string } | null> {
-  const phone = toBrazilWhatsApp(rawPhone)
-  if (!phone) return null
+  const candidates = Array.from(new Set([normalizePhone(rawPhone), toBrazilWhatsApp(rawPhone)].filter(Boolean)))
+  if (!candidates.length) return null
   const db = getAdminClient()
   const { data } = await db
     .from('resellers')
     .select('name')
-    .eq('phone', phone)
+    .in('phone', candidates)
     .eq('active', true)
-    .maybeSingle()
-  return data ? { name: (data as { name: string }).name } : null
+    .limit(1)
+  return data && data.length ? { name: (data[0] as { name: string }).name } : null
 }

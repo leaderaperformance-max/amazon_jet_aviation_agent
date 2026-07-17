@@ -4,13 +4,13 @@ import { findReseller } from '@/lib/resellers'
 import { getAdminClient } from '@/lib/supabase/admin'
 const mockGet = getAdminClient as ReturnType<typeof vi.fn>
 
-function dbReturning(data: unknown) {
+function dbReturning(rows: unknown[]) {
   return {
     from: vi.fn().mockReturnValue({
       select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
+        in: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
-            maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
+            limit: vi.fn().mockResolvedValue({ data: rows, error: null }),
           }),
         }),
       }),
@@ -20,12 +20,12 @@ function dbReturning(data: unknown) {
 
 describe('findReseller', () => {
   beforeEach(() => vi.clearAllMocks())
-  it('acha consultor por número normalizado', async () => {
-    mockGet.mockReturnValue(dbReturning({ name: 'Anderson' }))
+  it('acha consultor por número (casa canônico ou cru)', async () => {
+    mockGet.mockReturnValue(dbReturning([{ name: 'Anderson' }]))
     expect(await findReseller('+55 (95) 99172-0919')).toEqual({ name: 'Anderson' })
   })
   it('retorna null quando não acha', async () => {
-    mockGet.mockReturnValue(dbReturning(null))
+    mockGet.mockReturnValue(dbReturning([]))
     expect(await findReseller('5511999999999')).toBeNull()
   })
   it('retorna null pra número vazio sem bater no banco', async () => {
