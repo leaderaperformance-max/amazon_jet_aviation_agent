@@ -2,6 +2,7 @@ import { ensureClientConversation } from '@/lib/chatwoot-outbound'
 import { sendChatwootReply } from '@/lib/chatwoot-send'
 import { sendMessage } from '@/lib/quepasa'
 import { saveMessage } from '@/lib/memory'
+import { addLabel } from '@/lib/tags'
 
 export function buildProactiveMessage(input: {
   clientName: string
@@ -29,6 +30,8 @@ export async function reachOutToClient(input: {
   resellerName: string
   items: Array<{ part_number: string; quantity: string }>
   quepasaCfg?: { host: string; token: string } | null
+  /** Etiqueta de qualificação posta na conversa do CLIENTE → dispara o card no Kanban (automação Chatwoot). */
+  qualificationLabel?: string
 }): Promise<void> {
   const text = buildProactiveMessage({
     clientName: input.clientName, resellerName: input.resellerName, items: input.items,
@@ -37,6 +40,14 @@ export async function reachOutToClient(input: {
     const { conversationId } = await ensureClientConversation(input.chatwootCfg, {
       phone: input.clientPhone, name: input.clientName, inboxId: input.inboxId,
     })
+    // Etiqueta na conversa do CLIENTE → a automação do Chatwoot cria o card no funil.
+    if (input.qualificationLabel) {
+      try {
+        await addLabel(input.chatwootCfg, conversationId, [], input.qualificationLabel)
+      } catch (e) {
+        console.warn(`[proactive] addLabel falhou (não fatal): ${(e as Error).message?.slice(0, 150)}`)
+      }
+    }
     await sendChatwootReply(input.chatwootCfg, conversationId, text)
   } catch (err) {
     console.warn(`[proactive] Chatwoot falhou, fallback QuePasa: ${(err as Error).message?.slice(0, 200)}`)

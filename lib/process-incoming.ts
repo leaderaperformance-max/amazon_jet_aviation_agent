@@ -280,11 +280,15 @@ export function buildAgentTools(params: {
           console.warn(`[envia_pn] seller_phone or QuePasa fallback not available for inbox ${inbox.id}`)
         }
 
-        // Primeira vez: marca enviada + etiqueta orçamento_pendente (NUNCA orcamento_enviado).
+        // Primeira vez: marca enviada. Etiqueta de qualificação (NUNCA orcamento_enviado):
+        //  - cliente direto → na própria conversa (dispara o card do funil aqui);
+        //  - revendedor → vai na conversa do CLIENTE (dentro do reachOutToClient), nunca na do revendedor.
         if (decision.action === 'enviada') {
           await markSent(sol.id)
-          labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
-          await updateContactLabels(contactId, labelsState)
+          if (!reseller) {
+            labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
+            await updateContactLabels(contactId, labelsState)
+          }
         }
 
         // Fase B: alcance proativo ao cliente — só na 1ª vez e quando veio via revendedor.
@@ -294,7 +298,7 @@ export function buildAgentTools(params: {
               chatwootCfg, inboxId: inbox.chatwoot_inbox_id,
               clientPhone, clientName, resellerName: reseller.name,
               items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
-              quepasaCfg,
+              quepasaCfg, qualificationLabel: 'orçamento_pendente',
             })
           } catch (err) {
             console.warn(`[envia_pn] proativo falhou (não fatal): ${(err as Error).message?.slice(0, 200)}`)
