@@ -24,6 +24,7 @@ import {
 } from '@/lib/solicitacoes'
 import { buildGroupMessage } from '@/lib/quote-messages'
 import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
+import { reachOutToClient } from '@/lib/proactive-client'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -158,29 +159,29 @@ export function buildAgentTools(params: {
         forcar_nova: z.boolean().optional().describe('true só quando o cliente confirmou que é uma NOVA cotação após um possivel_duplicata.'),
       }),
       execute: async (args) => {
-        // 1. Cliente final. Revendedor: usa client_* dos args. Cliente direto: usa o remetente.
-        const clientPhone = normalizePhone(args.client_phone) || normalizePhone(senderPhone)
+        // 1. Cliente final.
+        //    clientPhone = telefone real (pode ser null em canais sem telefone: site/email).
+        //    clientKey  = chave de dedup da solicitação: telefone real, senão a própria sessão.
+        const clientPhone = normalizePhone(args.client_phone) || normalizePhone(senderPhone) || null
+        const clientKey = clientPhone ?? sessionId
         const clientName = (args.client_name && args.client_name.trim())
           || (senderName && senderName.trim()) || null
 
+        // Revendedor SEMPRE precisa do telefone do cliente final (é a chave + destino do proativo).
         if (reseller && !normalizePhone(args.client_phone)) {
           console.log('[envia_pn] revendedor sem client_phone → faltou_cliente')
           return { status: 'faltou_cliente' as const }
         }
-        if (!clientPhone) {
-          console.log('[envia_pn] sem telefone do cliente → faltou_cliente')
-          return { status: 'faltou_cliente' as const }
-        }
 
-        console.log(`[envia_pn] firing items=${args.items.length} urg=${args.urgency} client=${clientName} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)
+        console.log(`[envia_pn] firing items=${args.items.length} urg=${args.urgency} client=${clientName} key=${clientKey} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)
 
         // 2. Solicitação (fecha a aberta se forçar nova)
         if (args.forcar_nova) {
-          const aberta = await getOpenSolicitacao(clientPhone)
+          const aberta = await getOpenSolicitacao(clientKey)
           if (aberta) await closeSolicitacao(aberta.id)
         }
-        const sol = (await getOpenSolicitacao(clientPhone)) ?? (await openSolicitacao({
-          clientPhone, clientName, originSessionId: sessionId,
+        const sol = (await getOpenSolicitacao(clientKey)) ?? (await openSolicitacao({
+          clientPhone: clientKey, clientName, originSessionId: sessionId,
           viaReseller: !!reseller, resellerName: reseller?.name ?? null,
           resellerPhone: reseller ? normalizePhone(senderPhone) : null,
         }))
@@ -286,7 +287,19 @@ export function buildAgentTools(params: {
           await updateContactLabels(contactId, labelsState)
         }
 
-        // (Fase B — Task 12 injeta aqui o alcance proativo ao cliente)
+        // Fase B: alcance proativo ao cliente — só na 1ª vez e quando veio via revendedor.
+        if (decision.action === 'enviada' && reseller && clientPhone && clientName) {
+          try {
+            await reachOutToClient({
+              chatwootCfg, inboxId: inbox.chatwoot_inbox_id,
+              clientPhone, clientName, resellerName: reseller.name,
+              items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+              quepasaCfg,
+            })
+          } catch (err) {
+            console.warn(`[envia_pn] proativo falhou (não fatal): ${(err as Error).message?.slice(0, 200)}`)
+          }
+        }
 
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
         // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
@@ -366,8 +379,8 @@ export async function processIncomingMessage(
   // Contexto extra pro agente: origem revendedor + estado da solicitação aberta do cliente.
   // A solicitação é keyada por telefone NORMALIZADO (não por sessionId) → robusto ao formato
   // do identificador. Este é o mecanismo confiável de "o agente lembra do contexto".
-  const ctxPhone = normalizePhone(senderPhone)
-  const openSol = ctxPhone ? await getOpenSolicitacao(ctxPhone) : null
+  const ctxKey = normalizePhone(senderPhone) || sessionId
+  const openSol = await getOpenSolicitacao(ctxKey)
   const extraContext = [
     reseller ? buildResellerDirective(reseller.name) : '',
     openSol ? buildQuoteContextDirective({ numero: openSol.numero, resellerName: openSol.reseller_name, partNumbers: openSol.part_numbers }) : '',
