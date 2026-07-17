@@ -224,9 +224,12 @@ export function buildAgentTools(params: {
           })
           sheetUrl = sheet.url
           console.log(`[envia_pn] sheet created: ${sheet.url}`)
-          if (leadIds.length) {
+          // Atualiza TODOS os leads da solicitação (antigos + novos) com a planilha atual,
+          // pra não ficar link velho nos leads das rodadas anteriores.
+          const allLeadIds = Array.from(new Set([...sol.lead_ids, ...leadIds]))
+          if (allLeadIds.length) {
             const admin = getAdminClient()
-            await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', leadIds)
+            await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', allLeadIds)
           }
         } catch (err) {
           const errMsg = (err as Error).message ?? String(err)
