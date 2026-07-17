@@ -10,6 +10,12 @@ describe('buildResellerDirective', () => {
     expect(d).toContain('client_name')
     expect(d).toContain('client_phone')
   })
+  it('sem número → manda pedir o número e NÃO dizer que enviou', () => {
+    const d = buildResellerDirective('Anderson')
+    expect(d).toContain('faltou_cliente')
+    expect(d).toContain('preciso do número do cliente')
+    expect(d.toLowerCase()).toContain('nunca diga')
+  })
 })
 
 describe('buildQuoteContextDirective', () => {
