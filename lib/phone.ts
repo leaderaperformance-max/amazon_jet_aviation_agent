@@ -25,3 +25,19 @@ export function toBrazilWhatsApp(raw: string | null | undefined): string {
   if (local.length === 11) return '55' + local // DDD + 9 + 8 → celular completo
   return digits // formato não reconhecido: devolve os dígitos como estão
 }
+
+/**
+ * Gera as formas plausíveis de um número pra casar cadastro × inbound, cobrindo
+ * BR e US, com ou sem DDI. Usado na detecção de revendedor (números BR 55… e US 1…).
+ * Cadastre cada revendedor na forma canônica (BR: 55+DDD+9; US: 1+DDD+7).
+ */
+export function phoneMatchCandidates(raw: string | null | undefined): string[] {
+  const d = normalizePhone(raw)
+  if (!d) return []
+  const out = new Set<string>([d])
+  const br = toBrazilWhatsApp(d)
+  if (br) out.add(br)                                    // forma BR canônica
+  if (d.length === 10) out.add('1' + d)                 // US: 10 dígitos → +1 (DDI EUA)
+  if (d.length === 11 && d.startsWith('1')) out.add(d.slice(1)) // US com 1 → também sem
+  return Array.from(out)
+}

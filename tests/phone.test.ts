@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePhone, toBrazilWhatsApp } from '@/lib/phone'
+import { normalizePhone, toBrazilWhatsApp, phoneMatchCandidates } from '@/lib/phone'
 
 describe('normalizePhone', () => {
   it('mantém só dígitos', () => {
@@ -31,5 +31,24 @@ describe('toBrazilWhatsApp', () => {
   it('vazio → vazio', () => {
     expect(toBrazilWhatsApp('')).toBe('')
     expect(toBrazilWhatsApp(null)).toBe('')
+  })
+})
+
+describe('phoneMatchCandidates', () => {
+  it('BR: casa a forma canônica venha com ou sem 55', () => {
+    expect(phoneMatchCandidates('5593991720919')).toContain('5593991720919')
+    expect(phoneMatchCandidates('93991720919')).toContain('5593991720919')
+  })
+  it('US: número de 10 dígitos gera a forma com +1', () => {
+    expect(phoneMatchCandidates('7285006474')).toContain('17285006474')
+  })
+  it('US: número com 1 gera também a forma sem o 1', () => {
+    const c = phoneMatchCandidates('17285006474')
+    expect(c).toContain('17285006474')
+    expect(c).toContain('7285006474')
+  })
+  it('vazio → []', () => {
+    expect(phoneMatchCandidates('')).toEqual([])
+    expect(phoneMatchCandidates(null)).toEqual([])
   })
 })
