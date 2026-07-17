@@ -1,5 +1,11 @@
 import { getAdminClient } from '@/lib/supabase/admin'
 
+export interface SolicitacaoItem {
+  part_number: string
+  quantity: string
+  notes?: string
+}
+
 export interface Solicitacao {
   id: string
   numero: number
@@ -7,6 +13,7 @@ export interface Solicitacao {
   client_name: string | null
   state: 'aberta' | 'enviada' | 'fechada'
   part_numbers: string[]
+  items: SolicitacaoItem[]
   lead_ids: string[]
   via_reseller: boolean
   reseller_name: string | null
@@ -16,6 +23,19 @@ export interface Solicitacao {
   opened_at: string
   updated_at: string
   closed_at: string | null
+}
+
+/**
+ * Junta a lista existente com os items novos, deduplicando por Part Number
+ * (case-insensitive + trim). Item novo com o mesmo PN SUBSTITUI o antigo
+ * (quantidade/notes mais recentes vencem). Preserva a ordem: existentes primeiro.
+ */
+export function mergeItems(existing: SolicitacaoItem[], incoming: SolicitacaoItem[]): SolicitacaoItem[] {
+  const norm = (p: string) => p.trim().toUpperCase()
+  const byPn = new Map<string, SolicitacaoItem>()
+  for (const it of existing) byPn.set(norm(it.part_number), it)
+  for (const it of incoming) byPn.set(norm(it.part_number), it)
+  return Array.from(byPn.values())
 }
 
 /** Separa items novos (PN inédito na solicitação) dos repetidos. Case-insensitive + trim. */
@@ -87,14 +107,18 @@ export async function openSolicitacao(input: OpenSolicitacaoInput): Promise<Soli
   return data as Solicitacao
 }
 
-export async function addToSolicitacao(id: string, pns: string[], leadIds: string[]): Promise<void> {
+/**
+ * Grava a lista COMPLETA e atual de items na solicitação (já mesclada via mergeItems)
+ * e acumula os lead_ids. `part_numbers` é derivada dos items (fonte de verdade = items).
+ */
+export async function addToSolicitacao(id: string, items: SolicitacaoItem[], leadIds: string[]): Promise<void> {
   const db = getAdminClient()
-  const { data } = await db.from('solicitacoes').select('part_numbers, lead_ids').eq('id', id).maybeSingle()
-  const cur = data as { part_numbers: string[]; lead_ids: string[] } | null
-  const part_numbers = Array.from(new Set([...(cur?.part_numbers ?? []), ...pns]))
+  const { data } = await db.from('solicitacoes').select('lead_ids').eq('id', id).maybeSingle()
+  const cur = data as { lead_ids: string[] } | null
   const lead_ids = Array.from(new Set([...(cur?.lead_ids ?? []), ...leadIds]))
+  const part_numbers = items.map(i => i.part_number)
   await db.from('solicitacoes')
-    .update({ part_numbers, lead_ids, updated_at: new Date().toISOString() }).eq('id', id)
+    .update({ items, part_numbers, lead_ids, updated_at: new Date().toISOString() }).eq('id', id)
 }
 
 export async function markSent(id: string): Promise<void> {

@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { splitItemsByQuote, formatNumero, decideDispatch } from '@/lib/solicitacoes'
+import { splitItemsByQuote, formatNumero, decideDispatch, mergeItems } from '@/lib/solicitacoes'
+
+describe('mergeItems', () => {
+  it('junta existentes + novos, dedup por PN, novo vence (qtd atualizada)', () => {
+    const r = mergeItems(
+      [{ part_number: 'ABC', quantity: '2' }, { part_number: 'XYZ', quantity: '1' }],
+      [{ part_number: 'abc', quantity: '5' }, { part_number: 'NEW', quantity: '3' }],
+    )
+    expect(r).toEqual([
+      { part_number: 'abc', quantity: '5' }, // ABC substituído, qtd nova 5, mantém a posição
+      { part_number: 'XYZ', quantity: '1' },
+      { part_number: 'NEW', quantity: '3' },
+    ])
+  })
+  it('lista vazia + novos = novos', () => {
+    expect(mergeItems([], [{ part_number: 'ABC', quantity: '2' }])).toEqual([{ part_number: 'ABC', quantity: '2' }])
+  })
+})
 
 describe('splitItemsByQuote', () => {
   it('separa PN novo do repetido (case-insensitive + trim)', () => {

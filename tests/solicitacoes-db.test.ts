@@ -6,7 +6,7 @@ const mockGet = getAdminClient as ReturnType<typeof vi.fn>
 
 const fresh = {
   id: 's1', numero: 1, client_phone: '55', client_name: null, state: 'aberta',
-  part_numbers: [], lead_ids: [], via_reseller: false, reseller_name: null,
+  part_numbers: [], items: [], lead_ids: [], via_reseller: false, reseller_name: null,
   reseller_phone: null, origin_session_id: '55', sent_to_group_at: null,
   opened_at: '2026-07-17T00:00:00Z', updated_at: '2026-07-17T00:00:00Z', closed_at: null,
 }

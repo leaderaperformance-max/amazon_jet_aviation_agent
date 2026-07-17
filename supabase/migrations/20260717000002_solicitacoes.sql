@@ -7,7 +7,8 @@ create table if not exists solicitacoes (
   client_phone      text not null,                 -- CHAVE de dedup (cliente final, normalizado)
   client_name       text,
   state             text not null default 'aberta',-- aberta | enviada | fechada
-  part_numbers      text[] not null default '{}',
+  part_numbers      text[] not null default '{}',   -- só os PNs (chave de dedup)
+  items             jsonb not null default '[]',    -- lista completa: {part_number, quantity, notes?}
   lead_ids          uuid[] not null default '{}',
   via_reseller      boolean not null default false,
   reseller_name     text,

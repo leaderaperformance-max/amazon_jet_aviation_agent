@@ -16,10 +16,10 @@ import { drainPending } from '@/lib/debounce'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import type { InboxConfig } from '@/lib/types'
 import { isQStashEnabled, scheduleSlaTakeover } from '@/lib/qstash'
-import { normalizePhone } from '@/lib/phone'
+import { toBrazilWhatsApp } from '@/lib/phone'
 import { findReseller } from '@/lib/resellers'
 import {
-  decideDispatch, getOpenSolicitacao, openSolicitacao, closeSolicitacao,
+  decideDispatch, mergeItems, getOpenSolicitacao, openSolicitacao, closeSolicitacao,
   addToSolicitacao, markSent,
 } from '@/lib/solicitacoes'
 import { buildGroupMessage } from '@/lib/quote-messages'
@@ -159,16 +159,17 @@ export function buildAgentTools(params: {
         forcar_nova: z.boolean().optional().describe('true só quando o cliente confirmou que é uma NOVA cotação após um possivel_duplicata.'),
       }),
       execute: async (args) => {
-        // 1. Cliente final.
+        // 1. Cliente final. Número SEMPRE canonicalizado (55 + DDD + 9) — mesma forma
+        //    usada quando o cliente responder, pra a chave e o proativo baterem.
         //    clientPhone = telefone real (pode ser null em canais sem telefone: site/email).
         //    clientKey  = chave de dedup da solicitação: telefone real, senão a própria sessão.
-        const clientPhone = normalizePhone(args.client_phone) || normalizePhone(senderPhone) || null
+        const clientPhone = toBrazilWhatsApp(args.client_phone) || toBrazilWhatsApp(senderPhone) || null
         const clientKey = clientPhone ?? sessionId
         const clientName = (args.client_name && args.client_name.trim())
           || (senderName && senderName.trim()) || null
 
         // Revendedor SEMPRE precisa do telefone do cliente final (é a chave + destino do proativo).
-        if (reseller && !normalizePhone(args.client_phone)) {
+        if (reseller && !toBrazilWhatsApp(args.client_phone)) {
           console.log('[envia_pn] revendedor sem client_phone → faltou_cliente')
           return { status: 'faltou_cliente' as const }
         }
@@ -183,7 +184,7 @@ export function buildAgentTools(params: {
         const sol = (await getOpenSolicitacao(clientKey)) ?? (await openSolicitacao({
           clientPhone: clientKey, clientName, originSessionId: sessionId,
           viaReseller: !!reseller, resellerName: reseller?.name ?? null,
-          resellerPhone: reseller ? normalizePhone(senderPhone) : null,
+          resellerPhone: reseller ? toBrazilWhatsApp(senderPhone) : null,
         }))
 
         // 3. Decisão de disparo (trava determinística anti-duplicação)
@@ -192,6 +193,10 @@ export function buildAgentTools(params: {
           console.log(`[envia_pn] possivel_duplicata sol=${sol.numero} — não dispara`)
           return { status: 'possivel_duplicata' as const, numero: sol.numero }
         }
+
+        // Lista COMPLETA e atual (mescla o que já tinha com o lote novo) — é ela que
+        // vai no grupo, na planilha e fica gravada. Garante que a ATUALIZAÇÃO nunca sai parcial.
+        const fullItems = mergeItems(sol.items ?? [], args.items)
 
         // 4. Cria leads só pros items novos
         const leadIds: string[] = []
@@ -207,14 +212,14 @@ export function buildAgentTools(params: {
           })
           leadIds.push(lead.id)
         }
-        await addToSolicitacao(sol.id, decision.novos.map(i => i.part_number), leadIds)
+        await addToSolicitacao(sol.id, fullItems, leadIds)
 
         let sheetUrl: string | null = null
         try {
           const sheet = await createPartsSheet({
             customerName: clientName,
             customerPhone: clientPhone,
-            items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+            items: fullItems.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
             urgency: args.urgency,
           })
           sheetUrl = sheet.url
@@ -271,7 +276,7 @@ export function buildAgentTools(params: {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
           const sellerMsg = buildGroupMessage({
             action: decision.action, numero: sol.numero, channelLabel,
-            clientName, clientPhone, urgency: args.urgency, items: args.items,
+            clientName, clientPhone, urgency: args.urgency, items: fullItems,
             generalNotes: args.general_notes ?? null, resellerName: reseller?.name ?? null,
             sheetUrl, chatwootUrl,
           })
@@ -297,7 +302,7 @@ export function buildAgentTools(params: {
             await reachOutToClient({
               chatwootCfg, inboxId: inbox.chatwoot_inbox_id,
               clientPhone, clientName, resellerName: reseller.name,
-              items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+              items: fullItems.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
               quepasaCfg, qualificationLabel: 'orçamento_pendente',
             })
           } catch (err) {
@@ -307,7 +312,8 @@ export function buildAgentTools(params: {
 
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
         // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
-        return { status: decision.action, numero: sol.numero, lead_ids: leadIds, count: decision.novos.length }
+        // `ok: true` mantém compat com a diretiva do agente (que espera {ok:true} pra fechar).
+        return { ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds, count: decision.novos.length }
       },
     }),
   }
@@ -383,7 +389,7 @@ export async function processIncomingMessage(
   // Contexto extra pro agente: origem revendedor + estado da solicitação aberta do cliente.
   // A solicitação é keyada por telefone NORMALIZADO (não por sessionId) → robusto ao formato
   // do identificador. Este é o mecanismo confiável de "o agente lembra do contexto".
-  const ctxKey = normalizePhone(senderPhone) || sessionId
+  const ctxKey = toBrazilWhatsApp(senderPhone) || sessionId
   const openSol = await getOpenSolicitacao(ctxKey)
   const extraContext = [
     reseller ? buildResellerDirective(reseller.name) : '',

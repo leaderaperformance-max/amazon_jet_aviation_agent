@@ -13,9 +13,15 @@ describe('buildGroupMessage', () => {
     expect(m).toContain('🆕 *SOLICITAÇÃO #0102*')
     expect(m).toContain('👤 *Cliente:* João')
   })
-  it('atualização usa 🔄 ATUALIZAÇÃO #0102', () => {
+  it('atualização deixa claríssimo que é atualização (header + aviso)', () => {
     const m = buildGroupMessage({ ...base, action: 'atualizada' })
-    expect(m).toContain('🔄 *ATUALIZAÇÃO #0102*')
+    expect(m).toContain('ATUALIZAÇÃO DA #0102')
+    expect(m).toContain('NÃO é um pedido novo')
+    expect(m).toContain('Lista completa')
+  })
+  it('primeira vez NÃO mostra o aviso de atualização', () => {
+    const m = buildGroupMessage({ ...base, action: 'enviada' })
+    expect(m).not.toContain('NÃO é um pedido novo')
   })
   it('inclui "via consultor" quando houver reseller', () => {
     const m = buildGroupMessage({ ...base, action: 'enviada', resellerName: 'Anderson' })
