@@ -16,7 +16,7 @@ import { drainPending } from '@/lib/debounce'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import type { InboxConfig } from '@/lib/types'
 import { isQStashEnabled, scheduleSlaTakeover } from '@/lib/qstash'
-import { toBrazilWhatsApp } from '@/lib/phone'
+import { normalizePhone, toBrazilWhatsApp } from '@/lib/phone'
 import { findReseller } from '@/lib/resellers'
 import {
   decideDispatch, mergeItems, getOpenSolicitacao, openSolicitacao, closeSolicitacao,
@@ -184,7 +184,7 @@ export function buildAgentTools(params: {
         const sol = (await getOpenSolicitacao(clientKey)) ?? (await openSolicitacao({
           clientPhone: clientKey, clientName, originSessionId: sessionId,
           viaReseller: !!reseller, resellerName: reseller?.name ?? null,
-          resellerPhone: reseller ? toBrazilWhatsApp(senderPhone) : null,
+          resellerPhone: reseller ? (normalizePhone(senderPhone) || null) : null, // dígitos crus (pode ser US)
         }))
 
         // 3. Decisão de disparo (trava determinística anti-duplicação)
