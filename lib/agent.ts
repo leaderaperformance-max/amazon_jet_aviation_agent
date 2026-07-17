@@ -33,7 +33,7 @@ export async function runAgent(
   openaiModel: string,
   tools?: Record<string, unknown>,
   currentLabels: string[] = [],
-  opts: { saveUserMessage?: boolean } = {},
+  opts: { saveUserMessage?: boolean; extraContext?: string } = {},
 ): Promise<string> {
   const history: MemoryMessage[] = await loadHistory(sessionId)
   const messages = [...history, { role: 'user' as const, content: userMessage }]
@@ -49,7 +49,7 @@ export async function runAgent(
 
   const generateParams: Parameters<typeof generateText>[0] = {
     model: openai(openaiModel),
-    system: injectCurrentDate(systemPrompt) + toolDirective,
+    system: injectCurrentDate(systemPrompt) + toolDirective + (opts.extraContext ?? ''),
     messages,
     // Allow the model to call tools AND produce a final text answer
     // (up to 5 steps: tool calls + final assistant text).
