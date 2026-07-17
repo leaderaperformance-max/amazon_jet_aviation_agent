@@ -16,6 +16,15 @@ import { drainPending } from '@/lib/debounce'
 import { processAttachment, type ChatwootAttachment } from '@/lib/media/process'
 import type { InboxConfig } from '@/lib/types'
 import { isQStashEnabled, scheduleSlaTakeover } from '@/lib/qstash'
+import { normalizePhone, toBrazilWhatsApp } from '@/lib/phone'
+import { findReseller } from '@/lib/resellers'
+import {
+  decideDispatch, mergeItems, getOpenSolicitacao, openSolicitacao, closeSolicitacao,
+  addToSolicitacao, markSent,
+} from '@/lib/solicitacoes'
+import { buildGroupMessage } from '@/lib/quote-messages'
+import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
+import { reachOutToClient } from '@/lib/proactive-client'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -84,8 +93,10 @@ export function buildAgentTools(params: {
   senderPhone: string | null
   chatwootCfg: { baseUrl: string; accountId: number; userToken: string }
   initialLabels: string[]
+  sessionId: string
+  reseller: { name: string } | null
 }): { tools: Record<string, unknown>; getLabels: () => string[] } {
-  const { inbox, conversationId, contactId, senderName, senderPhone, chatwootCfg } = params
+  const { inbox, conversationId, contactId, senderName, senderPhone, chatwootCfg, sessionId, reseller } = params
   let labelsState = [...params.initialLabels]
   const labelEnum = z.enum(BUSINESS_LABELS)
 
@@ -134,7 +145,7 @@ export function buildAgentTools(params: {
       },
     }),
     envia_pn: tool({
-      description: 'Envia lead qualificado ao vendedor humano. Aceita 1+ items (Part Number + quantidade). CHAME quando tiver todos os dados. Use general_notes pra incluir contexto adicional como modelo da aeronave (formato: "Aeronave: Cessna 172") ou outras informações estratégicas do SPIN.',
+      description: 'Envia lead qualificado ao grupo do vendedor. Aceita 1+ items (Part Number + quantidade). CHAME quando tiver todos os dados. Sempre passe a lista COMPLETA e atual de PNs. Se a origem for consultor/revendedor, passe client_name e client_phone do cliente final. Use forcar_nova=true só quando o cliente confirmar que é uma NOVA cotação após um possivel_duplicata.',
       inputSchema: z.object({
         items: z.array(z.object({
           part_number: z.string(),
@@ -143,46 +154,92 @@ export function buildAgentTools(params: {
         })).min(1),
         urgency: z.enum(['AOG', 'rotina']),
         general_notes: z.string().optional().describe('Contexto adicional: aeronave (ex. "Aeronave: Cessna 172"), urgência operacional, frequência de uso, etc.'),
+        client_name: z.string().optional().describe('Nome do cliente final (obrigatório quando a origem é consultor/revendedor).'),
+        client_phone: z.string().optional().describe('Número do cliente final (obrigatório quando a origem é consultor/revendedor).'),
+        forcar_nova: z.boolean().optional().describe('true só quando o cliente confirmou que é uma NOVA cotação após um possivel_duplicata.'),
       }),
       execute: async (args) => {
-        const finalName = (senderName && senderName.trim()) || null
-        const finalPhone = (senderPhone && senderPhone.trim()) || null
+        // 1. Cliente final. Número SEMPRE canonicalizado (55 + DDD + 9) — mesma forma
+        //    usada quando o cliente responder, pra a chave e o proativo baterem.
+        //    clientPhone = telefone real (pode ser null em canais sem telefone: site/email).
+        //    clientKey  = chave de dedup da solicitação: telefone real, senão a própria sessão.
+        const clientPhone = toBrazilWhatsApp(args.client_phone) || toBrazilWhatsApp(senderPhone) || null
+        const clientKey = clientPhone ?? sessionId
+        const clientName = (args.client_name && args.client_name.trim())
+          || (senderName && senderName.trim()) || null
 
-        console.log(`[envia_pn] firing with ${args.items.length} item(s) urg=${args.urgency} name=${finalName}`)
+        // Revendedor SEMPRE precisa do telefone do cliente final (é a chave + destino do proativo).
+        if (reseller && !toBrazilWhatsApp(args.client_phone)) {
+          console.log('[envia_pn] revendedor sem client_phone → faltou_cliente')
+          return { status: 'faltou_cliente' as const }
+        }
 
+        console.log(`[envia_pn] firing items=${args.items.length} urg=${args.urgency} client=${clientName} key=${clientKey} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)
+
+        // 2. Solicitação (fecha a aberta se forçar nova)
+        if (args.forcar_nova) {
+          const aberta = await getOpenSolicitacao(clientKey)
+          if (aberta) await closeSolicitacao(aberta.id)
+        }
+        const sol = (await getOpenSolicitacao(clientKey)) ?? (await openSolicitacao({
+          clientPhone: clientKey, clientName, originSessionId: sessionId,
+          viaReseller: !!reseller, resellerName: reseller?.name ?? null,
+          resellerPhone: reseller ? (normalizePhone(senderPhone) || null) : null, // dígitos crus (pode ser US)
+        }))
+
+        // 3. Decisão de disparo (trava determinística anti-duplicação)
+        const decision = decideDispatch(sol, args.items)
+        if (decision.action === 'possivel_duplicata') {
+          console.log(`[envia_pn] possivel_duplicata sol=${sol.numero} — não dispara`)
+          return { status: 'possivel_duplicata' as const, numero: sol.numero }
+        }
+
+        // Lista COMPLETA e atual (mescla o que já tinha com o lote novo) — é ela que
+        // vai no grupo, na planilha e fica gravada. Garante que a ATUALIZAÇÃO nunca sai parcial.
+        const fullItems = mergeItems(sol.items ?? [], args.items)
+
+        // 4. Cria leads só pros items novos
         const leadIds: string[] = []
-        for (const item of args.items) {
+        for (const item of decision.novos) {
           const lead = await createLead({
             contact_id: contactId,
             part_number: item.part_number,
             quantity: item.quantity,
             urgency: args.urgency,
-            customer_name: finalName,
-            customer_phone: finalPhone,
+            customer_name: clientName,
+            customer_phone: clientPhone,
             notes: item.notes ?? args.general_notes ?? null,
           })
           leadIds.push(lead.id)
         }
+        await addToSolicitacao(sol.id, fullItems, leadIds)
 
         let sheetUrl: string | null = null
         try {
           const sheet = await createPartsSheet({
-            customerName: finalName,
-            customerPhone: finalPhone,
-            items: args.items.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+            customerName: clientName,
+            customerPhone: clientPhone,
+            items: fullItems.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
             urgency: args.urgency,
           })
           sheetUrl = sheet.url
           console.log(`[envia_pn] sheet created: ${sheet.url}`)
-          const admin = getAdminClient()
-          await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', leadIds)
+          // Atualiza TODOS os leads da solicitação (antigos + novos) com a planilha atual,
+          // pra não ficar link velho nos leads das rodadas anteriores.
+          const allLeadIds = Array.from(new Set([...sol.lead_ids, ...leadIds]))
+          if (allLeadIds.length) {
+            const admin = getAdminClient()
+            await admin.from('leads').update({ sheet_url: sheetUrl }).in('id', allLeadIds)
+          }
         } catch (err) {
           const errMsg = (err as Error).message ?? String(err)
           console.warn(`[envia_pn] sheet creation failed (non-fatal): ${errMsg.slice(0, 500)}`)
-          try {
-            const admin = getAdminClient()
-            await admin.from('leads').update({ notes: `[sheet_error] ${errMsg.slice(0, 400)}` }).in('id', leadIds)
-          } catch {}
+          if (leadIds.length) {
+            try {
+              const admin = getAdminClient()
+              await admin.from('leads').update({ notes: `[sheet_error] ${errMsg.slice(0, 400)}` }).in('id', leadIds)
+            } catch {}
+          }
         }
 
         // Seller notification — QuePasa from THIS inbox or fallback to any inbox with QuePasa
@@ -220,32 +277,46 @@ export function buildAgentTools(params: {
 
         if (sellerPhone && quepasaCfg) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
-          const urgencyEmoji = args.urgency === 'AOG' ? '🔴' : '🟡'
-          const itemsBlock = args.items.length === 1
-            ? `🔧 *Part Number:* ${args.items[0].part_number}\n🔢 *Quantidade:* ${args.items[0].quantity}${args.items[0].notes ? `\n📝 ${args.items[0].notes}` : ''}`
-            : `📋 *ITENS (${args.items.length}):*\n` + args.items.map((it, i) => `  ${i + 1}. ${it.part_number} — Qtd: ${it.quantity}${it.notes ? ` (${it.notes})` : ''}`).join('\n')
-          const sellerMsg = [
-            '🆕 *NOVO LEAD QUALIFICADO*', '',
-            `📡 *Origem:* ${channelLabel}`,
-            `👤 *Cliente:* ${finalName ?? '(sem nome)'}`,
-            finalPhone ? `📱 *WhatsApp:* ${finalPhone}` : null,
-            `⚡ *Urgência:* ${args.urgency} ${urgencyEmoji}`, '',
-            itemsBlock, '',
-            args.general_notes ? `📝 _${args.general_notes}_` : null,
-            sheetUrl ? `📊 *Planilha:* ${sheetUrl}` : null,
-            '', '🔗 Atender em:', chatwootUrl,
-          ].filter(Boolean).join('\n')
+          const sellerMsg = buildGroupMessage({
+            action: decision.action, numero: sol.numero, channelLabel,
+            clientName, clientPhone, urgency: args.urgency, items: fullItems,
+            generalNotes: args.general_notes ?? null, resellerName: reseller?.name ?? null,
+            sheetUrl, chatwootUrl,
+          })
           await sendMessage(quepasaCfg, sellerPhone, sellerMsg)
         } else {
           console.warn(`[envia_pn] seller_phone or QuePasa fallback not available for inbox ${inbox.id}`)
         }
 
-        labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
-        await updateContactLabels(contactId, labelsState)
+        // Primeira vez: marca enviada. Etiqueta de qualificação (NUNCA orcamento_enviado):
+        //  - cliente direto → na própria conversa (dispara o card do funil aqui);
+        //  - revendedor → vai na conversa do CLIENTE (dentro do reachOutToClient), nunca na do revendedor.
+        if (decision.action === 'enviada') {
+          await markSent(sol.id)
+          if (!reseller) {
+            labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
+            await updateContactLabels(contactId, labelsState)
+          }
+        }
+
+        // Fase B: alcance proativo ao cliente — só na 1ª vez e quando veio via revendedor.
+        if (decision.action === 'enviada' && reseller && clientPhone && clientName) {
+          try {
+            await reachOutToClient({
+              chatwootCfg, inboxId: inbox.chatwoot_inbox_id,
+              clientPhone, clientName, resellerName: reseller.name,
+              items: fullItems.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
+              quepasaCfg, qualificationLabel: 'orçamento_pendente',
+            })
+          } catch (err) {
+            console.warn(`[envia_pn] proativo falhou (não fatal): ${(err as Error).message?.slice(0, 200)}`)
+          }
+        }
 
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
         // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
-        return { ok: true, lead_ids: leadIds, count: args.items.length }
+        // `ok: true` mantém compat com a diretiva do agente (que espera {ok:true} pra fechar).
+        return { ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds, count: decision.novos.length }
       },
     }),
   }
@@ -310,15 +381,29 @@ export async function processIncomingMessage(
     userToken: inbox.chatwoot_user_token,
   }
 
+  const reseller = await findReseller(senderPhone)
+
   const { tools, getLabels } = buildAgentTools({
     inbox, conversationId, contactId: contact.id,
     senderName, senderPhone, chatwootCfg, initialLabels: labels,
+    sessionId, reseller,
   })
+
+  // Contexto extra pro agente: origem revendedor + estado da solicitação aberta do cliente.
+  // A solicitação é keyada por telefone NORMALIZADO (não por sessionId) → robusto ao formato
+  // do identificador. Este é o mecanismo confiável de "o agente lembra do contexto".
+  const ctxKey = toBrazilWhatsApp(senderPhone) || sessionId
+  const openSol = await getOpenSolicitacao(ctxKey)
+  const extraContext = [
+    reseller ? buildResellerDirective(reseller.name) : '',
+    openSol ? buildQuoteContextDirective({ numero: openSol.numero, resellerName: openSol.reseller_name, partNumbers: openSol.part_numbers }) : '',
+  ].join('')
 
   const openai = await loadOpenAIConfig()
   const reply = await runAgent(
     sessionId, content, inbox.system_prompt,
     openai.apiKey, openai.model, tools, getLabels(),
+    { extraContext },
   )
   console.log(`[process] replyLen=${reply.length}`)
 
