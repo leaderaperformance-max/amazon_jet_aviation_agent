@@ -23,6 +23,16 @@ describe('regra máxima: Part Number obrigatório', () => {
   })
 })
 
+describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)', () => {
+  it('declara a obrigação de extrair PNs de documento/PDF/lista', () => {
+    expect(agentSrc).toContain('OBRIGATÓRIO EXTRAIR')
+    expect(agentSrc).toContain('extract_part_numbers')
+  })
+  it('proíbe pedir de volta PNs que já estão no documento', () => {
+    expect(agentSrc).toContain('NÃO peça os PNs de volta')
+  })
+})
+
 describe('regras de negócio já conquistadas (não podem regredir)', () => {
   it('nunca manda link de planilha pro cliente', () => {
     expect(agentSrc).toContain('NUNCA mande link de planilha')

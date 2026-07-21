@@ -381,7 +381,10 @@ export async function processIncomingMessage(
     userToken: inbox.chatwoot_user_token,
   }
 
-  const reseller = await findReseller(senderPhone)
+  // Detecção de revendedor: usa senderPhone e cai pro senderIdent (JID do WhatsApp,
+  // ex. "17285006474@s.whatsapp.net") quando o phone_number vem vazio no evento do webhook.
+  // Sem esse fallback, um consultor (ex.: Marco Antônio, número US) era tratado como cliente normal.
+  const reseller = await findReseller(senderPhone || senderIdent)
 
   const { tools, getLabels } = buildAgentTools({
     inbox, conversationId, contactId: contact.id,
