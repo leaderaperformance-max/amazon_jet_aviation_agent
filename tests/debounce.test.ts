@@ -38,6 +38,12 @@ vi.mock('@/lib/supabase/admin', () => ({
             })),
           })),
           update: vi.fn(() => ({
+            // Claim atômico: .update().eq().eq().select() devolve as linhas reivindicadas.
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                select: vi.fn(() => Promise.resolve(selectResult)),
+              })),
+            })),
             in: vi.fn(() => Promise.resolve(updateResult)),
           })),
         }

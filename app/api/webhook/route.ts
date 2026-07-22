@@ -184,10 +184,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const inserted = await insertPending(sessionId, textContent, message.id, ctx)
   console.log(`[webhook] pending ${inserted.id} session=${sessionId} anexos=${attachments.length}`)
 
-  // Debounce: anexo precisa de janela pra agrupar múltiplos PDFs que chegam
-  // em tempos diferentes; texto junta as picadas.
-  const longDelay = parseInt(process.env.DEBOUNCE_DELAY_SEC ?? '25', 10)
-  const attachDelay = parseInt(process.env.DEBOUNCE_DELAY_ATTACH_SEC ?? '15', 10)
+  // Debounce: janela pra agrupar texto + documento/imagem que chegam em tempos
+  // diferentes (o cliente manda "quero cotar" e o PDF/foto logo depois). Janela
+  // maior = merge mais confiável; o merge pega a ÚLTIMA mensagem (hasNewerPending),
+  // então a janela vale entre uma mensagem e a próxima.
+  const longDelay = parseInt(process.env.DEBOUNCE_DELAY_SEC ?? '30', 10)
+  const attachDelay = parseInt(process.env.DEBOUNCE_DELAY_ATTACH_SEC ?? '30', 10)
   const delaySec = attachments.length > 0 ? attachDelay : longDelay
 
   if (isQStashEnabled()) {

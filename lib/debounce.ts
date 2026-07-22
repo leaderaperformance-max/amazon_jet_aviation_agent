@@ -43,29 +43,24 @@ export async function drainPending(
 ): Promise<{ ids: string[]; combinedContent: string; context: unknown; attachments: unknown[] }> {
   const supabase = getAdminClient()
 
-  // Select all unprocessed for the session, mark them processed, combine.
-  const { data: rows, error: selErr } = await supabase
+  // Reivindica as pendentes ATOMICAMENTE: um único UPDATE ... RETURNING marca
+  // processed=true e devolve as linhas. Se dois drains concorrerem (QStash entrega
+  // o callback mais de uma vez), só UM pega as linhas — o outro volta vazio.
+  // Evita o processamento/resposta duplicada.
+  const { data: rows, error: claimErr } = await supabase
     .from('pending_messages')
-    .select('id, content, received_at, context')
+    .update({ processed: true })
     .eq('session_id', sessionId)
     .eq('processed', false)
-    .order('received_at', { ascending: true })
+    .select('id, content, received_at, context')
 
-  if (selErr) throw selErr
+  if (claimErr) throw claimErr
 
   const sorted = (rows ?? []).slice().sort(
     (a: { received_at: string }, b: { received_at: string }) =>
       a.received_at.localeCompare(b.received_at)
   )
   const ids = sorted.map((r: { id: string }) => r.id)
-
-  if (ids.length > 0) {
-    const { error: updErr } = await supabase
-      .from('pending_messages')
-      .update({ processed: true })
-      .in('id', ids)
-    if (updErr) throw updErr
-  }
 
   // Junta só o texto (não-vazio) com separador
   const combinedContent = sorted
