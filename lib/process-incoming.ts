@@ -418,10 +418,13 @@ export async function processIncomingMessage(
   ].join('')
 
   const openai = await loadOpenAIConfig()
+  // saveUserMessage: false — a mensagem do cliente JÁ foi salva no início deste
+  // pipeline; deixar o runAgent salvar de novo duplicava TODO turno do cliente na
+  // memória (metade do histórico que o modelo lê virava repetição).
   const reply = await runAgent(
     sessionId, content, inbox.system_prompt,
     openai.apiKey, openai.model, tools, getLabels(),
-    { extraContext },
+    { extraContext, saveUserMessage: false },
   )
   console.log(`[process] replyLen=${reply.length}`)
 
