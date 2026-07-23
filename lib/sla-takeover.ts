@@ -5,6 +5,10 @@ import { runAgent } from '@/lib/agent'
 import { sendMessage } from '@/lib/quepasa'
 import { buildAgentTools } from '@/lib/process-incoming'
 import { SYSTEM_LABEL } from '@/lib/types'
+import { findReseller } from '@/lib/resellers'
+import { toBrazilWhatsApp } from '@/lib/phone'
+import { getOpenSolicitacao } from '@/lib/solicitacoes'
+import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
 
 type Activity = 'responded' | 'newer_inbound' | 'silent'
 
@@ -55,15 +59,28 @@ export async function checkAndTakeover(p: {
     const labels = await addLabel(chatwootCfg, p.conversationId, contact.current_labels ?? [], SYSTEM_LABEL)
     await db.from('contacts').update({ current_labels: labels, status: 'ia' }).eq('id', contact.id)
 
+    // Mesma detecção do fluxo normal: o takeover TAMBÉM precisa saber se a conversa
+    // é de um consultor/revendedor (senão trata como cliente comum e pula a
+    // confirmação de nome+número do cliente final).
+    const reseller = await findReseller(p.sessionId)
+    const ctxKey = p.sessionId.includes('@s.whatsapp.net')
+      ? (toBrazilWhatsApp(p.sessionId) || p.sessionId)
+      : p.sessionId
+    const openSol = await getOpenSolicitacao(ctxKey)
+    const extraContext = [
+      reseller ? buildResellerDirective(reseller.name) : '',
+      openSol ? buildQuoteContextDirective({ numero: openSol.numero, resellerName: openSol.reseller_name, partNumbers: openSol.part_numbers }) : '',
+    ].join('')
+
     const { tools, getLabels } = buildAgentTools({
       inbox, conversationId: p.conversationId, contactId: contact.id,
       senderName: null, senderPhone: null, chatwootCfg, initialLabels: labels,
-      sessionId: p.sessionId, reseller: null,
+      sessionId: p.sessionId, reseller,
     })
     const openai = await loadOpenAIConfig()
     const reply = await runAgent(
       p.sessionId, TAKEOVER_NUDGE, inbox.system_prompt, openai.apiKey, openai.model,
-      tools, getLabels(), { saveUserMessage: false },
+      tools, getLabels(), { saveUserMessage: false, extraContext },
     )
     const recipient = p.sessionId.replace(/[^\d]/g, '')
     if (inbox.quepasa_host && inbox.quepasa_token) {

@@ -72,14 +72,21 @@ describe('insertPending', () => {
     }
 
     const result = await insertPending('session-abc', 'hello world', 42)
-    expect(result.id).toBe('uuid-1')
-    expect(result.received_at).toBe('2026-05-18T10:00:00Z')
+    expect(result?.id).toBe('uuid-1')
+    expect(result?.received_at).toBe('2026-05-18T10:00:00Z')
   })
 
   it('throws when supabase returns error', async () => {
     insertResult = { data: null, error: { message: 'DB error' } }
 
     await expect(insertPending('session-abc', 'hello')).rejects.toBeTruthy()
+  })
+
+  it('retorna null na entrega duplicada do webhook (23505 no índice único)', async () => {
+    insertResult = { data: null, error: { code: '23505', message: 'duplicate key' } }
+
+    const result = await insertPending('session-abc', 'hello', 42)
+    expect(result).toBeNull()
   })
 })
 

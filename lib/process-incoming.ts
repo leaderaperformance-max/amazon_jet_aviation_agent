@@ -19,8 +19,8 @@ import { isQStashEnabled, scheduleSlaTakeover } from '@/lib/qstash'
 import { normalizePhone, toBrazilWhatsApp } from '@/lib/phone'
 import { findReseller } from '@/lib/resellers'
 import {
-  decideDispatch, mergeItems, getOpenSolicitacao, openSolicitacao, closeSolicitacao,
-  addToSolicitacao, markSent,
+  decideDispatch, mergeItems, splitItemsByQuote, getOpenSolicitacao, openSolicitacao,
+  closeSolicitacao, addToSolicitacao, markSent,
 } from '@/lib/solicitacoes'
 import { buildGroupMessage } from '@/lib/quote-messages'
 import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
@@ -162,8 +162,11 @@ export function buildAgentTools(params: {
         // 1. Cliente final. Número SEMPRE canonicalizado (55 + DDD + 9) — mesma forma
         //    usada quando o cliente responder, pra a chave e o proativo baterem.
         //    clientPhone = telefone real (pode ser null em canais sem telefone: site/email).
-        //    clientKey  = chave de dedup da solicitação: telefone real, senão a própria sessão.
-        const clientPhone = toBrazilWhatsApp(args.client_phone) || toBrazilWhatsApp(senderPhone) || null
+        //    clientKey  = chave de dedup da solicitação: telefone real → JID da sessão
+        //    CANONICALIZADO (nunca o JID cru — senderPhone null gerava chave
+        //    "55...@s.whatsapp.net" que não casava com a canônica e duplicava a solicitação).
+        const sessionPhone = sessionId.includes('@s.whatsapp.net') ? toBrazilWhatsApp(sessionId) : ''
+        const clientPhone = toBrazilWhatsApp(args.client_phone) || toBrazilWhatsApp(senderPhone) || sessionPhone || null
         const clientKey = clientPhone ?? sessionId
         const clientName = (args.client_name && args.client_name.trim())
           || (senderName && senderName.trim()) || null
@@ -198,9 +201,12 @@ export function buildAgentTools(params: {
         // vai no grupo, na planilha e fica gravada. Garante que a ATUALIZAÇÃO nunca sai parcial.
         const fullItems = mergeItems(sol.items ?? [], args.items)
 
-        // 4. Cria leads só pros items novos
+        // 4. Cria leads só pros PNs realmente inéditos NA SOLICITAÇÃO (não em decision.novos:
+        // num retry após falha de envio ao grupo, decision volta 'enviada' com todos os
+        // items — e sem este split os leads duplicariam).
+        const { novos: trulyNew } = splitItemsByQuote(args.items, sol.part_numbers)
         const leadIds: string[] = []
-        for (const item of decision.novos) {
+        for (const item of trulyNew) {
           const lead = await createLead({
             contact_id: contactId,
             part_number: item.part_number,
@@ -275,6 +281,7 @@ export function buildAgentTools(params: {
           return inbox.name
         })()
 
+        let groupSent = false
         if (sellerPhone && quepasaCfg) {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
           const sellerMsg = buildGroupMessage({
@@ -283,24 +290,28 @@ export function buildAgentTools(params: {
             generalNotes: args.general_notes ?? null, resellerName: reseller?.name ?? null,
             sheetUrl, chatwootUrl,
           })
-          await sendMessage(quepasaCfg, sellerPhone, sellerMsg)
+          groupSent = await sendMessage(quepasaCfg, sellerPhone, sellerMsg)
+          if (!groupSent) console.warn(`[envia_pn] grupo NÃO recebeu (gateway?) — solicitação segue não-enviada pra redispatch`)
         } else {
           console.warn(`[envia_pn] seller_phone or QuePasa fallback not available for inbox ${inbox.id}`)
         }
 
-        // Primeira vez: marca enviada. Etiqueta de qualificação (NUNCA orcamento_enviado):
-        //  - cliente direto → na própria conversa (dispara o card do funil aqui);
-        //  - revendedor → vai na conversa do CLIENTE (dentro do reachOutToClient), nunca na do revendedor.
+        // Primeira vez: marca enviada SÓ se o grupo recebeu de fato — se o gateway
+        // caiu, a solicitação fica "não-enviada" e a próxima chamada redispara
+        // (leads não duplicam: trulyNew fica vazio). Etiqueta de qualificação
+        // (NUNCA orcamento_enviado): cliente direto → própria conversa; revendedor →
+        // conversa do CLIENTE (dentro do reachOutToClient), nunca a do revendedor.
         if (decision.action === 'enviada') {
-          await markSent(sol.id)
+          if (groupSent) await markSent(sol.id)
           if (!reseller) {
             labelsState = await addLabel(chatwootCfg, conversationId, labelsState, 'orçamento_pendente')
             await updateContactLabels(contactId, labelsState)
           }
         }
 
-        // Fase B: alcance proativo ao cliente — só na 1ª vez e quando veio via revendedor.
-        if (decision.action === 'enviada' && reseller && clientPhone && clientName) {
+        // Fase B: alcance proativo ao cliente — só na 1ª vez REALMENTE despachada e
+        // quando veio via revendedor (gated no groupSent pra não duplicar no retry).
+        if (decision.action === 'enviada' && groupSent && reseller && clientPhone && clientName) {
           try {
             await reachOutToClient({
               chatwootCfg, inboxId: inbox.chatwoot_inbox_id,
@@ -316,7 +327,7 @@ export function buildAgentTools(params: {
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
         // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
         // `ok: true` mantém compat com a diretiva do agente (que espera {ok:true} pra fechar).
-        return { ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds, count: decision.novos.length }
+        return { ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds, count: trulyNew.length, group_delivered: groupSent }
       },
     }),
   }
@@ -395,7 +406,11 @@ export async function processIncomingMessage(
   // Contexto extra pro agente: origem revendedor + estado da solicitação aberta do cliente.
   // A solicitação é keyada por telefone NORMALIZADO (não por sessionId) → robusto ao formato
   // do identificador. Este é o mecanismo confiável de "o agente lembra do contexto".
-  const ctxKey = toBrazilWhatsApp(senderPhone) || sessionId
+  // Mesma canonicalização do envia_pn: senderPhone → JID da sessão canonicalizado →
+  // sessionId cru (site/email). Chaves têm que bater nos dois lados senão a dedup fura.
+  const ctxKey = toBrazilWhatsApp(senderPhone)
+    || (sessionId.includes('@s.whatsapp.net') ? toBrazilWhatsApp(sessionId) : '')
+    || sessionId
   const openSol = await getOpenSolicitacao(ctxKey)
   const extraContext = [
     reseller ? buildResellerDirective(reseller.name) : '',

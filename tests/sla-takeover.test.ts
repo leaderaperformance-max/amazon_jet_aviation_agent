@@ -33,6 +33,11 @@ vi.mock('@/lib/tags', () => ({ addLabel: vi.fn().mockResolvedValue(['atendimento
 vi.mock('@/lib/agent', () => ({ runAgent: vi.fn().mockResolvedValue('Oi, assumindo!') }))
 vi.mock('@/lib/quepasa', () => ({ sendMessage: vi.fn() }))
 vi.mock('@/lib/process-incoming', () => ({ buildAgentTools: vi.fn(() => ({ tools: {}, getLabels: () => [] })) }))
+vi.mock('@/lib/resellers', () => ({ findReseller: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/solicitacoes', () => ({
+  getOpenSolicitacao: vi.fn().mockResolvedValue(null),
+  formatNumero: (n: number) => `#${String(n).padStart(4, '0')}`, // usado por agent-directives
+}))
 
 beforeEach(() => {
   vi.restoreAllMocks()

@@ -28,6 +28,11 @@ describe('toBrazilWhatsApp', () => {
   it('normaliza um número já com 55 e 9 mas formatado', () => {
     expect(toBrazilWhatsApp('+55 (95) 99172-0919')).toBe('5595991720919')
   })
+  it('extrai o telefone canônico de um JID do WhatsApp (chave de solicitação)', () => {
+    // sessionId "5584999859918@s.whatsapp.net" tem que virar a MESMA chave que o
+    // telefone canônico — senão a dedup de solicitações fura (bug #11 vs #12).
+    expect(toBrazilWhatsApp('5584999859918@s.whatsapp.net')).toBe('5584999859918')
+  })
   it('vazio → vazio', () => {
     expect(toBrazilWhatsApp('')).toBe('')
     expect(toBrazilWhatsApp(null)).toBe('')

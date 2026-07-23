@@ -180,8 +180,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     attachments: attachments.length > 0 ? attachments : undefined,
   }
 
-  // Insere na fila (content = só texto; anexos vão no context pro worker extrair)
+  // Insere na fila (content = só texto; anexos vão no context pro worker extrair).
+  // null = MESMA message.id já enfileirada (webhook entregue 2x) → ignora e sai:
+  // sem isso, a entrega dupla virava dois processamentos e resposta duplicada.
   const inserted = await insertPending(sessionId, textContent, message.id, ctx)
+  if (!inserted) {
+    console.log(`[webhook] SKIP: duplicate delivery msg=${message.id} session=${sessionId}`)
+    return NextResponse.json({ ok: true, skipped: 'duplicate' })
+  }
   console.log(`[webhook] pending ${inserted.id} session=${sessionId} anexos=${attachments.length}`)
 
   // Debounce: janela pra agrupar texto + documento/imagem que chegam em tempos

@@ -1,11 +1,16 @@
 import { getAdminClient } from '@/lib/supabase/admin'
 
+/**
+ * Enfileira a mensagem. Retorna null quando a MESMA message.id do Chatwoot já foi
+ * enfileirada antes (webhook entregue em duplicidade) — o chamador deve ignorar.
+ * A unicidade vem do índice uq_pending_chatwoot_msg (migration 20260723000001).
+ */
 export async function insertPending(
   sessionId: string,
   content: string,
   chatwootMessageId?: number,
   context?: unknown,
-): Promise<{ id: string; received_at: string }> {
+): Promise<{ id: string; received_at: string } | null> {
   const supabase = getAdminClient()
   const { data, error } = await supabase
     .from('pending_messages')
@@ -20,7 +25,14 @@ export async function insertPending(
     .select('id, received_at')
     .single()
 
-  if (error) throw error
+  if (error) {
+    // 23505 = violação do índice único → entrega duplicada do webhook. Ignora.
+    if ((error as { code?: string }).code === '23505') {
+      console.log(`[debounce] duplicate chatwoot_message_id=${chatwootMessageId} — ignorando`)
+      return null
+    }
+    throw error
+  }
   return { id: data.id, received_at: data.received_at }
 }
 
