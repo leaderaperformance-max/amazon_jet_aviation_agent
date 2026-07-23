@@ -33,6 +33,19 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   })
 })
 
+describe('proatividade: nunca deixar cotação de cliente passar', () => {
+  it('declara a missão de reunir os 3 dados e nunca ficar passivo', () => {
+    expect(agentSrc).toContain('NUNCA DEIXE UMA COTAÇÃO PASSAR')
+    expect(agentSrc).toContain('PROIBIDO ficar passivo')
+  })
+  it('proíbe "aguardo seu retorno" antes do envia_pn', () => {
+    expect(agentSrc).toContain('NUNCA encerre passivo com dado faltando')
+  })
+  it('manda pedir o dado que faltou quando o cliente respondeu só parte', () => {
+    expect(agentSrc).toContain('E quantas unidades?')
+  })
+})
+
 describe('regras de negócio já conquistadas (não podem regredir)', () => {
   it('nunca manda link de planilha pro cliente', () => {
     expect(agentSrc).toContain('NUNCA mande link de planilha')
