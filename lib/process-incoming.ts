@@ -9,7 +9,7 @@ import { saveMessage } from '@/lib/memory'
 import { addLabel, removeLabel } from '@/lib/tags'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
-import { validatePartNumber, extractPartNumbersFromText } from '@/lib/part-number'
+import { validatePartNumber, extractPartNumbersFromText, isLikelyDescription } from '@/lib/part-number'
 import { createLead } from '@/lib/leads'
 import { createPartsSheet } from '@/lib/google/sheets'
 import { drainPending } from '@/lib/debounce'
@@ -175,6 +175,15 @@ export function buildAgentTools(params: {
         if (reseller && !toBrazilWhatsApp(args.client_phone)) {
           console.log('[envia_pn] revendedor sem client_phone → faltou_cliente')
           return { status: 'faltou_cliente' as const }
+        }
+
+        // TRAVA: descrição de peça NÃO é Part Number. Se algum item veio como frase
+        // ("Antenas de CHT do Garmin G3X", "Par de luzes de navegação"), NÃO cria cotação —
+        // devolve a lista pro agente pedir o PN real de cada um. Nada de descrição no grupo.
+        const descricoes = args.items.filter(it => isLikelyDescription(it.part_number))
+        if (descricoes.length > 0) {
+          console.log(`[envia_pn] ${descricoes.length}/${args.items.length} item(s) são descrição, não PN → faltou_pn`)
+          return { status: 'faltou_pn' as const, descricoes: descricoes.map(d => d.part_number) }
         }
 
         console.log(`[envia_pn] firing items=${args.items.length} urg=${args.urgency} client=${clientName} key=${clientKey} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)

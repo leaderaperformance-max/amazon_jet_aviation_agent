@@ -272,6 +272,28 @@ Responda APENAS um JSON, sem markdown:
   }
 }
 
+/**
+ * Heurística conservadora: o texto parece uma DESCRIÇÃO de peça, não um Part Number.
+ * PN real é um CÓDIGO curto ("K10-00016-13", "010-01057-00", "AN814-4BL", "GDU 460").
+ * Descrição é uma FRASE ("Par de luzes de navegação/strobo", "Antenas de CHT do
+ * Garmin G3X", "Instrumento de Painel Horímetro", "Luz de beacon").
+ *
+ * Regra de ALTA PRECISÃO (não bloquear PN legítimo):
+ *  - >= 4 palavras → descrição; OU
+ *  - >= 2 palavras E sem nenhum dígito → descrição.
+ * "GDU 460" (2 palavras, tem dígito) passa como PN; "Antenas de CHT do Garmin G3X"
+ * (5 palavras) é barrado. Usada como trava no envia_pn pra descrição nunca virar cotação.
+ */
+export function isLikelyDescription(raw: string | null | undefined): boolean {
+  const s = (raw ?? '').trim()
+  if (!s) return false
+  const words = s.split(/\s+/).filter(Boolean)
+  const hasDigit = /\d/.test(s)
+  if (words.length >= 4) return true
+  if (words.length >= 2 && !hasDigit) return true
+  return false
+}
+
 export interface ExtractedItem {
   candidate: string
   context: string

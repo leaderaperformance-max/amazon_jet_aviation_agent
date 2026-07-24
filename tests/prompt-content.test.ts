@@ -31,6 +31,13 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   it('proíbe pedir de volta PNs que já estão no documento', () => {
     expect(agentSrc).toContain('NÃO peça os PNs de volta')
   })
+  it('documento com DESCRIÇÃO (não código) não conta como ter o PN', () => {
+    expect(agentSrc).toContain('só conta como "ter o PN" se o documento traz o CÓDIGO')
+    expect(agentSrc).toContain('Descrição, mesmo com nome de fabricante/modelo')
+  })
+  it('trata o status faltou_pn pedindo o código de cada descrição', () => {
+    expect(agentSrc).toContain("status: 'faltou_pn'")
+  })
 })
 
 describe('proatividade: nunca deixar cotação de cliente passar', () => {
