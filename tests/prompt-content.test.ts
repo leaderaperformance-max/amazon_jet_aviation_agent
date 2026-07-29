@@ -44,6 +44,17 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   })
 })
 
+describe('confirmação de cotação: padrão da empresa + listagem de PNs', () => {
+  it('manda usar a resposta_pronta verbatim', () => {
+    expect(agentSrc).toContain('resposta_pronta')
+    expect(agentSrc).toContain('Responda EXATAMENTE esse texto')
+  })
+  it('proíbe resumir com "Total de itens" em vez de listar', () => {
+    expect(agentSrc).toContain('Total de itens')
+    expect(agentSrc).toContain('TODOS os PNs têm que aparecer listados')
+  })
+})
+
 describe('proatividade: nunca deixar cotação de cliente passar', () => {
   it('declara a missão de reunir os 3 dados e nunca ficar passivo', () => {
     expect(agentSrc).toContain('NUNCA DEIXE UMA COTAÇÃO PASSAR')

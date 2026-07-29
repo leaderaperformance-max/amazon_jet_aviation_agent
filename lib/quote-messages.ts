@@ -2,6 +2,37 @@ import { formatNumero } from '@/lib/solicitacoes'
 
 export interface QuoteItem { part_number: string; quantity: string; notes?: string }
 
+/**
+ * Confirmação PADRÃO devolvida a quem enviou a cotação (consultor/revendedor).
+ * Montada pelo sistema — não pelo modelo — pra a resposta nunca improvisar formato
+ * nem resumir com "total de itens: N": a listagem dos PNs é obrigatória.
+ */
+export function buildQuoteConfirmation(input: {
+  action: 'enviada' | 'atualizada'
+  numero: number
+  clientName: string | null
+  clientPhone: string | null
+  urgency: string
+  items: QuoteItem[]
+  resellerName?: string | null
+}): string {
+  const id = formatNumero(input.numero)
+  const header = input.action === 'enviada'
+    ? `✅ *SOLICITAÇÃO ${id} enviada ao grupo de cotação*`
+    : `🔄 *ATUALIZAÇÃO DA ${id} enviada ao grupo de cotação*`
+  const urgencyEmoji = input.urgency === 'AOG' ? '🔴' : '🟡'
+  const itemsBlock = `📋 *ITENS (${input.items.length}):*\n`
+    + input.items.map((it, i) => `${i + 1}. ${it.part_number} — Qtd: ${it.quantity}`).join('\n')
+  return [
+    header, '',
+    `👤 *Cliente:* ${input.clientName ?? '(sem nome)'}`,
+    input.clientPhone ? `📱 *WhatsApp:* ${input.clientPhone}` : null,
+    `⚡ *Urgência:* ${input.urgency} ${urgencyEmoji}`, '',
+    itemsBlock, '',
+    'Assim que o time retornar com a cotação, aviso por aqui!',
+  ].filter(Boolean).join('\n')
+}
+
 export function buildGroupMessage(input: {
   action: 'enviada' | 'atualizada'
   numero: number

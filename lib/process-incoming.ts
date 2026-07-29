@@ -22,7 +22,7 @@ import {
   decideDispatch, mergeItems, splitItemsByQuote, getOpenSolicitacao, openSolicitacao,
   closeSolicitacao, addToSolicitacao, markSent,
 } from '@/lib/solicitacoes'
-import { buildGroupMessage } from '@/lib/quote-messages'
+import { buildGroupMessage, buildQuoteConfirmation } from '@/lib/quote-messages'
 import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
 import { reachOutToClient } from '@/lib/proactive-client'
 
@@ -333,10 +333,22 @@ export function buildAgentTools(params: {
           }
         }
 
+        // Confirmação PADRÃO montada pelo sistema (com a listagem dos PNs). O agente
+        // deve responder isto VERBATIM — sem isso ele improvisava o formato e resumia
+        // com "Total de itens: 38" em vez de listar os PNs.
+        const respostaPronta = buildQuoteConfirmation({
+          action: decision.action, numero: sol.numero, clientName, clientPhone,
+          urgency: args.urgency, items: fullItems, resellerName: reseller?.name ?? null,
+        })
+
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno
         // (vai só pro grupo do vendedor). Se voltasse, a IA mandava pro cliente.
         // `ok: true` mantém compat com a diretiva do agente (que espera {ok:true} pra fechar).
-        return { ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds, count: trulyNew.length, group_delivered: groupSent }
+        return {
+          ok: true, status: decision.action, numero: sol.numero, lead_ids: leadIds,
+          count: trulyNew.length, group_delivered: groupSent,
+          resposta_pronta: respostaPronta,
+        }
       },
     }),
   }
