@@ -154,8 +154,8 @@ export function buildAgentTools(params: {
         })).min(1),
         urgency: z.enum(['AOG', 'rotina']),
         general_notes: z.string().optional().describe('Contexto adicional: aeronave (ex. "Aeronave: Cessna 172"), urgência operacional, frequência de uso, etc.'),
-        client_name: z.string().optional().describe('Nome do cliente final (obrigatório quando a origem é consultor/revendedor).'),
-        client_phone: z.string().optional().describe('Número do cliente final (obrigatório quando a origem é consultor/revendedor).'),
+        client_name: z.string().optional().describe('Nome do cliente final DITO NA CONVERSA pelo consultor (obrigatório quando a origem é consultor/revendedor). NUNCA use nome tirado de dentro do documento/PDF — cabeçalho de documento é da empresa emissora, não do cliente.'),
+        client_phone: z.string().optional().describe('Número do cliente final DITO NA CONVERSA pelo consultor (obrigatório quando a origem é consultor/revendedor). NUNCA use telefone tirado de dentro do documento/PDF.'),
         forcar_nova: z.boolean().optional().describe('true só quando o cliente confirmou que é uma NOVA cotação após um possivel_duplicata.'),
       }),
       execute: async (args) => {

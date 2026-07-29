@@ -33,6 +33,13 @@ describe('toBrazilWhatsApp', () => {
     // telefone canônico — senão a dedup de solicitações fura (bug #11 vs #12).
     expect(toBrazilWhatsApp('5584999859918@s.whatsapp.net')).toBe('5584999859918')
   })
+  it('FIXO não ganha o 9 (não fabrica celular falso)', () => {
+    // (31) 3681-5756 = fixo da oficina no cabeçalho do PDF — caso real: virou
+    // "5531936815756" (celular inexistente) e recebeu mensagem proativa.
+    expect(toBrazilWhatsApp('31 3681-5756')).toBe('553136815756')
+    expect(toBrazilWhatsApp('553136815756')).toBe('553136815756') // idempotente
+    expect(toBrazilWhatsApp('55 (31) 3681-5756')).toBe('553136815756')
+  })
   it('vazio → vazio', () => {
     expect(toBrazilWhatsApp('')).toBe('')
     expect(toBrazilWhatsApp(null)).toBe('')

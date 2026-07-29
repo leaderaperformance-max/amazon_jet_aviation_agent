@@ -16,6 +16,12 @@ describe('buildResellerDirective', () => {
     expect(d).toContain('preciso do número do cliente')
     expect(d.toLowerCase()).toContain('nunca diga')
   })
+  it('dados do cliente vêm da CONVERSA, nunca de dentro do documento', () => {
+    const d = buildResellerDirective('Anderson')
+    expect(d).toContain('EXCLUSIVAMENTE do que o CONSULTOR escreveu na CONVERSA')
+    expect(d).toContain('NUNCA use nome/telefone/e-mail que aparecem DENTRO do documento')
+    expect(d).toContain('PROIBIDO completar o número com um telefone achado no documento')
+  })
 })
 
 describe('buildQuoteContextDirective', () => {

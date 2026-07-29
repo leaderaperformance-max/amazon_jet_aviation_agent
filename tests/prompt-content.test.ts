@@ -38,6 +38,10 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   it('trata o status faltou_pn pedindo o código de cada descrição', () => {
     expect(agentSrc).toContain("status: 'faltou_pn'")
   })
+  it('contatos dentro do documento não são o cliente', () => {
+    expect(agentSrc).toContain('CONTATOS DENTRO DO DOCUMENTO NÃO SÃO O CLIENTE')
+    expect(agentSrc).toContain('empresa que EMITIU o documento')
+  })
 })
 
 describe('proatividade: nunca deixar cotação de cliente passar', () => {

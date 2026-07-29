@@ -19,8 +19,15 @@ export function toBrazilWhatsApp(raw: string | null | undefined): string {
   }
   // Agora `local` deve ser DDD (2) + número (8 sem o 9 / 9 com o 9).
   if (local.length === 10) {
-    // DDD + 8 dígitos → celular sem o nono dígito: insere o 9 após o DDD.
-    local = local.slice(0, 2) + '9' + local.slice(2)
+    // DDD + 8 dígitos: só é celular antigo se o assinante começa em 6-9 → ganha o 9.
+    // Assinante 2-5 é TELEFONE FIXO — inserir o 9 fabricaria um celular falso
+    // (bug real: o fixo da oficina no cabeçalho de um PDF virou destino de mensagem).
+    const first = local[2]
+    if (first >= '6' && first <= '9') {
+      local = local.slice(0, 2) + '9' + local.slice(2)
+    } else {
+      return '55' + local // fixo: mantém 10 dígitos, sem inventar o 9
+    }
   }
   if (local.length === 11) return '55' + local // DDD + 9 + 8 → celular completo
   return digits // formato não reconhecido: devolve os dígitos como estão
