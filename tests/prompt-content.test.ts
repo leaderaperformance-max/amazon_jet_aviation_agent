@@ -44,6 +44,24 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   })
 })
 
+describe('urgência: nunca sugerir AOG (cliente fala primeiro)', () => {
+  it('não oferece a escolha "AOG ou rotina" como PERGUNTA ao cliente', () => {
+    // A frase só pode aparecer dentro da PROIBIÇÃO ("Não escreva ..."), nunca como
+    // template de pergunta ("→ AGORA pergunte: ...", "• Urgência (AOG ou rotina)?").
+    expect(agentSrc).not.toContain('Urgência (AOG ou rotina)?')
+    expect(agentSrc).not.toMatch(/pergunte[^\n]{0,40}é AOG ou rotina\?/)
+    expect(agentSrc).not.toMatch(/Última coisa — é AOG/)
+  })
+  it('pergunta a urgência de forma ABERTA', () => {
+    expect(agentSrc).toContain('qual a urgência para o recebimento da peça?')
+    expect(agentSrc).toContain('NUNCA OFEREÇA AS OPÇÕES "AOG OU ROTINA" AO CLIENTE')
+  })
+  it('só classifica AOG se o cliente falar espontaneamente; pressa = rotina', () => {
+    expect(agentSrc).toContain('Só classifique como AOG se o PRÓPRIO CLIENTE disser espontaneamente')
+    expect(agentSrc).toContain('Pressa NÃO é AOG')
+  })
+})
+
 describe('confirmação de cotação: padrão da empresa + listagem de PNs', () => {
   it('manda usar a resposta_pronta verbatim', () => {
     expect(agentSrc).toContain('resposta_pronta')
