@@ -44,6 +44,16 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   })
 })
 
+describe('raciocínio interno nunca vai pro cliente', () => {
+  it('proíbe expor análise/plano e falar do cliente em 3ª pessoa', () => {
+    expect(agentSrc).toContain('NUNCA MOSTRE SEU RACIOCÍNIO AO CLIENTE')
+    expect(agentSrc).toContain('PROIBIDO falar do cliente em 3ª pessoa')
+  })
+  it('a resposta passa pelo sanitizador antes de sair', () => {
+    expect(agentSrc).toContain('sanitizeReply')
+  })
+})
+
 describe('urgência: nunca sugerir AOG (cliente fala primeiro)', () => {
   it('não oferece a escolha "AOG ou rotina" como PERGUNTA ao cliente', () => {
     // A frase só pode aparecer dentro da PROIBIÇÃO ("Não escreva ..."), nunca como
