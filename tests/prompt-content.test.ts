@@ -44,6 +44,19 @@ describe('PDF/documento com PNs: extrair é obrigação (nunca pedir de volta)',
   })
 })
 
+describe('prazo de entrega: nunca prometer', () => {
+  it('declara a proibição de informar prazo de entrega', () => {
+    expect(agentSrc).toContain('PRAZO DE ENTREGA — NUNCA PROMETA')
+    expect(agentSrc).toContain('É PROIBIDO informar prazo de entrega')
+  })
+  it('manda chamar o especialista humano quando pedirem prazo', () => {
+    expect(agentSrc).toContain('chamar_especialista')
+  })
+  it('a resposta passa pela trava de prazo antes de sair', () => {
+    expect(agentSrc).toContain('guardDeliveryDeadline')
+  })
+})
+
 describe('raciocínio interno nunca vai pro cliente', () => {
   it('proíbe expor análise/plano e falar do cliente em 3ª pessoa', () => {
     expect(agentSrc).toContain('NUNCA MOSTRE SEU RACIOCÍNIO AO CLIENTE')

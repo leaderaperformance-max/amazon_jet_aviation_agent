@@ -119,6 +119,42 @@ export function buildAgentTools(params: {
         return { ok: true, labels: labelsState }
       },
     }),
+    chamar_especialista: tool({
+      description: 'Passa a conversa para um atendente humano e avisa o time. CHAME quando o cliente pedir PRAZO DE ENTREGA (nunca informe prazo você mesmo), quando pedir algo que você não pode responder, ou quando pedir para falar com uma pessoa. Depois de chamar, responda ao cliente de forma simpática dizendo que um especialista já vai assumir.',
+      inputSchema: z.object({
+        motivo: z.string().describe('Motivo curto: "prazo", "negociação", "pediu humano", etc.'),
+      }),
+      execute: async ({ motivo }: { motivo: string }) => {
+        // Tira a etiqueta de atendimento_ia: a IA para de responder e o humano assume.
+        try {
+          labelsState = await removeLabel(chatwootCfg, conversationId, labelsState, SYSTEM_LABEL)
+          await updateContactLabels(contactId, labelsState)
+        } catch (err) {
+          console.warn(`[chamar_especialista] falha ao remover ${SYSTEM_LABEL}:`, err)
+        }
+
+        // Avisa o time no grupo (best-effort — não pode derrubar o atendimento).
+        try {
+          const sellerPhone = (inbox as unknown as { seller_phone?: string | null }).seller_phone
+          if (sellerPhone && inbox.quepasa_host && inbox.quepasa_token) {
+            const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
+            const aviso = [
+              '🙋 *ATENDIMENTO HUMANO SOLICITADO*', '',
+              `👤 *Cliente:* ${senderName ?? '(sem nome)'}`,
+              senderPhone ? `📱 *WhatsApp:* ${senderPhone}` : null,
+              `📌 *Motivo:* ${motivo}`, '',
+              '🔗 Assumir em:', chatwootUrl,
+            ].filter(Boolean).join('\n')
+            await sendMessage({ host: inbox.quepasa_host, token: inbox.quepasa_token }, sellerPhone, aviso)
+          }
+        } catch (err) {
+          console.warn('[chamar_especialista] falha ao avisar o grupo:', err)
+        }
+
+        console.log(`[chamar_especialista] conversa ${conversationId} passada ao humano — motivo: ${motivo}`)
+        return { ok: true, transferido: true }
+      },
+    }),
     validate_part_number: tool({
       description: 'Valida se o texto é um Part Number aeronáutico legítimo. ' +
                    'Cobre MIL-SPEC (AN/MS/NAS/M-series), NSN, ATA e fabricantes ' +
