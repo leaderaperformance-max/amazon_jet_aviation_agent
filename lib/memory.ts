@@ -17,13 +17,24 @@ function parseContent(content: string): string {
   return content
 }
 
+const HISTORY_LIMIT = 25
+
+/**
+ * Carrega as ÚLTIMAS mensagens da conversa, em ordem cronológica.
+ *
+ * ⚠️ Bug histórico (corrigido): ordenava por id ASCENDENTE com limit, ou seja, pegava
+ * as 25 mensagens MAIS ANTIGAS da sessão. Em conversas longas (revendedores têm meses
+ * de histórico) o modelo enxergava junho e não via o que o cliente falou minutos antes —
+ * daí PN de outro cliente entrar na cotação, perguntas repetidas e "esqueceu o que eu disse".
+ * Busca DESC (as mais recentes) e inverte pra ordem cronológica.
+ */
 export async function loadHistory(sessionId: string): Promise<MemoryMessage[]> {
   const { data, error } = await supabase
     .from(TABLE)
     .select('*')
     .eq('session_id', sessionId)
-    .order('id', { ascending: true })
-    .limit(25)
+    .order('id', { ascending: false })
+    .limit(HISTORY_LIMIT)
 
   if (error) {
     throw new Error(`Failed to load history: ${error.message}`)
@@ -33,7 +44,9 @@ export async function loadHistory(sessionId: string): Promise<MemoryMessage[]> {
     return []
   }
 
-  return data.map((row: { message: { type: string; content: string } }) => {
+  const rows = data.slice().reverse() // cronológico: mais antiga → mais recente
+
+  return rows.map((row: { message: { type: string; content: string } }) => {
     const msg = row.message
     const role: 'user' | 'assistant' = msg.type === 'human' ? 'user' : 'assistant'
     const content = parseContent(msg.content)

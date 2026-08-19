@@ -16,18 +16,9 @@ describe('loadHistory', () => {
   })
 
   it('maps rows correctly with array content for human and string content for ai', async () => {
+    // O banco devolve DESC (mais recente primeiro); loadHistory inverte pra cronológico.
     const mockLimit = vi.fn().mockResolvedValue({
       data: [
-        {
-          id: 1,
-          session_id: 'sess-1',
-          message: {
-            type: 'human',
-            content: '["hello","world"]',
-            additional_kwargs: {},
-            response_metadata: {},
-          },
-        },
         {
           id: 2,
           session_id: 'sess-1',
@@ -38,6 +29,16 @@ describe('loadHistory', () => {
             additional_kwargs: {},
             response_metadata: {},
             invalid_tool_calls: [],
+          },
+        },
+        {
+          id: 1,
+          session_id: 'sess-1',
+          message: {
+            type: 'human',
+            content: '["hello","world"]',
+            additional_kwargs: {},
+            response_metadata: {},
           },
         },
       ],
@@ -56,8 +57,36 @@ describe('loadHistory', () => {
     ])
     expect(mockFrom).toHaveBeenCalledWith('memory_chat_amazon_jet')
     expect(mockEq).toHaveBeenCalledWith('session_id', 'sess-1')
-    expect(mockOrder).toHaveBeenCalledWith('id', { ascending: true })
+    // CRÍTICO: tem que buscar as mensagens MAIS RECENTES (DESC). Com ascending:true o
+    // modelo recebia as 25 mensagens mais ANTIGAS da sessão — em conversas longas ele
+    // via meses atrás e perdia o que o cliente falou minutos antes (PN de outro cliente
+    // vazando na cotação, perguntas repetidas).
+    expect(mockOrder).toHaveBeenCalledWith('id', { ascending: false })
     expect(mockLimit).toHaveBeenCalledWith(25)
+  })
+
+  it('conversa longa: entrega as mensagens RECENTES em ordem cronológica (bug do PN trocado)', async () => {
+    // Simula a sessão de um revendedor com meses de histórico: o banco devolve DESC.
+    // O modelo TEM que receber a conversa de hoje, não a de dois meses atrás.
+    const desc = [
+      { id: 3557, session_id: 's', message: { type: 'human', content: 'S1915-S, uma quantidade' } },
+      { id: 3556, session_id: 's', message: { type: 'ai', content: 'Preciso do Part Number.' } },
+      { id: 600, session_id: 's', message: { type: 'ai', content: 'Recebi seu PN K10-00280-01!' } },
+    ]
+    const mockLimit = vi.fn().mockResolvedValue({ data: desc, error: null })
+    const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit })
+    const mockEq = vi.fn().mockReturnValue({ order: mockOrder })
+    mockFrom.mockReturnValue({ select: vi.fn().mockReturnValue({ eq: mockEq }) })
+
+    const result = await loadHistory('s')
+
+    // cronológico: antiga → recente, e a ÚLTIMA é a mensagem mais nova
+    expect(result.map(r => r.content)).toEqual([
+      'Recebi seu PN K10-00280-01!',
+      'Preciso do Part Number.',
+      'S1915-S, uma quantidade',
+    ])
+    expect(result[result.length - 1].content).toContain('S1915-S')
   })
 
   it('returns empty array when no rows found', async () => {
