@@ -3,8 +3,11 @@ import { scheduleSlaTakeover } from '@/lib/qstash'
 import { classifyActivitySince, checkAndTakeover } from '@/lib/sla-takeover'
 import { runAgent } from '@/lib/agent'
 
-const { memRows, contactBox, getAdminMock } = vi.hoisted(() => {
+const { memRows, agentRows, contactBox, getAdminMock } = vi.hoisted(() => {
   const memRows: Array<{ message: { type: string; content: string }; created_at: string }> = []
+  // Linhas devolvidas pela busca do ÚLTIMO [atendente]: (lastAgentMessageAtMs).
+  // Vazio = nenhum humano falou → takeover pode rodar, como antes.
+  const agentRows: Array<{ message: { type: string; content: string }; created_at: string }> = []
   const contactBox: { value: { id: string; current_labels: string[] } | null } = {
     value: { id: 'c1', current_labels: [] },
   }
@@ -13,12 +16,14 @@ const { memRows, contactBox, getAdminMock } = vi.hoisted(() => {
     c.select = vi.fn(() => c)
     c.eq = vi.fn(() => c)
     c.update = vi.fn(() => c)
+    c.order = vi.fn(() => c)
+    c.limit = vi.fn(async () => ({ data: agentRows, error: null }))
     c.gt = vi.fn(async () => ({ data: memRows, error: null }))
     c.maybeSingle = vi.fn(async () => ({ data: contactBox.value, error: null }))
     return c
   }
   const getAdminMock = vi.fn(() => ({ from: vi.fn(() => chain()) }))
-  return { memRows, contactBox, getAdminMock }
+  return { memRows, agentRows, contactBox, getAdminMock }
 })
 vi.mock('@/lib/supabase/admin', () => ({ getAdminClient: getAdminMock }))
 
@@ -70,6 +75,24 @@ describe('classifyActivitySince', () => {
   })
   it('nada novo → silent', () => {
     expect(classifyActivitySince([])).toBe('silent')
+  })
+})
+
+describe('caso Alessandra: humano assumiu, IA não pode voltar', () => {
+  it('humano falou há 16 min → skipped_human_handling (não reassume)', async () => {
+    agentRows.length = 0
+    agentRows.push({
+      message: { type: 'human', content: '[atendente]: já respondi o cliente' },
+      created_at: new Date(Date.now() - 16 * 60_000).toISOString(),
+    })
+    memRows.length = 0
+    ;(runAgent as ReturnType<typeof vi.fn>).mockClear()
+
+    const r = await checkAndTakeover({ sessionId: 's@x', sinceAt: '2026-09-04T12:26:30Z', conversationId: 1, chatwootInboxId: 45 })
+
+    expect(r.action).toBe('skipped_human_handling')
+    expect(runAgent).not.toHaveBeenCalled() // nada é enviado ao cliente
+    agentRows.length = 0
   })
 })
 

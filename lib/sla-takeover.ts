@@ -32,6 +32,36 @@ export async function activitySince(sessionId: string, sinceAt: string): Promise
   return classifyActivitySince(rows)
 }
 
+/** Horas que a IA fica FORA depois que um humano falou na conversa. */
+const HUMAN_COOLDOWN_HOURS = () => parseInt(process.env.SLA_HUMAN_COOLDOWN_HOURS ?? '24', 10)
+
+/**
+ * Pura: o vendedor humano está conduzindo a conversa? Enquanto estiver dentro do
+ * cooldown, a IA NÃO reassume — quem desativou a IA foi um humano de propósito.
+ */
+export function humanIsHandling(lastAgentMs: number | null, nowMs: number, cooldownHours: number): boolean {
+  if (lastAgentMs === null) return false
+  return nowMs - lastAgentMs < cooldownHours * 3_600_000
+}
+
+/** Quando o vendedor humano ([atendente]:) falou pela última vez nessa conversa. */
+export async function lastAgentMessageAtMs(sessionId: string): Promise<number | null> {
+  const db = getAdminClient()
+  const { data } = await db.from('memory_chat_amazon_jet')
+    .select('message, created_at')
+    .eq('session_id', sessionId)
+    .order('id', { ascending: false })
+    .limit(40)
+  const rows = (data ?? []) as Array<{ message: { type: string; content: string }; created_at: string }>
+  for (const r of rows) {
+    const m = r.message
+    if (m?.type === 'human' && (m.content ?? '').startsWith('[atendente]:')) {
+      return new Date(r.created_at).getTime()
+    }
+  }
+  return null
+}
+
 const TAKEOVER_NUDGE =
   '[INSTRUÇÃO INTERNA: o cliente está aguardando resposta há 15 min e o vendedor humano não retornou. ' +
   'Assuma o atendimento AGORA e responda com base em TODO o histórico, inclusive o que o vendedor [atendente] já falou. ' +
@@ -39,7 +69,18 @@ const TAKEOVER_NUDGE =
 
 export async function checkAndTakeover(p: {
   sessionId: string; sinceAt: string; conversationId: number; chatwootInboxId: number
-}): Promise<{ action: 'skipped_responded' | 'skipped_newer' | 'took_over' | 'error'; error?: string }> {
+}): Promise<{ action: 'skipped_responded' | 'skipped_newer' | 'skipped_human_handling' | 'took_over' | 'error'; error?: string }> {
+  // 🚧 Vendedor humano está na conversa? A IA NÃO volta. Quem desativou a IA foi um
+  // humano de propósito — reassumir atropela o atendimento dele (reclamação real:
+  // "desativei e ela do nada mandou mensagem pro cliente").
+  // Também cobre a corrida em que o humano respondeu SEGUNDOS ANTES do agendamento:
+  // activitySince só enxerga o que veio depois de sinceAt e deixava passar.
+  const lastAgent = await lastAgentMessageAtMs(p.sessionId)
+  if (humanIsHandling(lastAgent, Date.now(), HUMAN_COOLDOWN_HOURS())) {
+    console.log(`[sla-takeover] ${p.sessionId}: humano conduzindo a conversa — IA não reassume`)
+    return { action: 'skipped_human_handling' }
+  }
+
   const activity = await activitySince(p.sessionId, p.sinceAt)
   if (activity === 'responded') return { action: 'skipped_responded' }
   if (activity === 'newer_inbound') return { action: 'skipped_newer' }

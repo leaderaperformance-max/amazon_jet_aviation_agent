@@ -25,6 +25,7 @@ import {
 import { buildGroupMessage, buildQuoteConfirmation } from '@/lib/quote-messages'
 import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
 import { reachOutToClient } from '@/lib/proactive-client'
+import { clientSaidAOG } from '@/lib/urgency-guard'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -222,7 +223,16 @@ export function buildAgentTools(params: {
           return { status: 'faltou_pn' as const, descricoes: descricoes.map(d => d.part_number) }
         }
 
-        console.log(`[envia_pn] firing items=${args.items.length} urg=${args.urgency} client=${clientName} key=${clientKey} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)
+        // TRAVA DE AOG: só é AOG se o CLIENTE escreveu "AOG". "urgente"/"emergência"/
+        // "aeronave parada" NÃO classificam sozinhos — senão todo mundo vira AOG e a
+        // prioridade real se perde. Se a IA marcou AOG sem a palavra, cai pra rotina.
+        let urgency: 'AOG' | 'rotina' = args.urgency
+        if (urgency === 'AOG' && !(await clientSaidAOG(sessionId))) {
+          console.warn(`[envia_pn] ⚠️ AOG marcado sem o cliente dizer "AOG" → rebaixado pra rotina`)
+          urgency = 'rotina'
+        }
+
+        console.log(`[envia_pn] firing items=${args.items.length} urg=${urgency} client=${clientName} key=${clientKey} reseller=${reseller?.name ?? '-'} forcarNova=${!!args.forcar_nova}`)
 
         // 2. Solicitação (fecha a aberta se forçar nova)
         if (args.forcar_nova) {
@@ -256,7 +266,7 @@ export function buildAgentTools(params: {
             contact_id: contactId,
             part_number: item.part_number,
             quantity: item.quantity,
-            urgency: args.urgency,
+            urgency: urgency,
             customer_name: clientName,
             customer_phone: clientPhone,
             notes: item.notes ?? args.general_notes ?? null,
@@ -271,7 +281,7 @@ export function buildAgentTools(params: {
             customerName: clientName,
             customerPhone: clientPhone,
             items: fullItems.map(i => ({ part_number: i.part_number, quantity: i.quantity })),
-            urgency: args.urgency,
+            urgency: urgency,
           })
           sheetUrl = sheet.url
           console.log(`[envia_pn] sheet created: ${sheet.url}`)
@@ -331,7 +341,7 @@ export function buildAgentTools(params: {
           const chatwootUrl = `${inbox.chatwoot_base_url}/app/accounts/${inbox.chatwoot_account_id}/conversations/${conversationId}`
           const sellerMsg = buildGroupMessage({
             action: decision.action, numero: sol.numero, channelLabel,
-            clientName, clientPhone, urgency: args.urgency, items: fullItems,
+            clientName, clientPhone, urgency: urgency, items: fullItems,
             generalNotes: args.general_notes ?? null, resellerName: reseller?.name ?? null,
             sheetUrl, chatwootUrl,
           })
@@ -374,7 +384,7 @@ export function buildAgentTools(params: {
         // com "Total de itens: 38" em vez de listar os PNs.
         const respostaPronta = buildQuoteConfirmation({
           action: decision.action, numero: sol.numero, clientName, clientPhone,
-          urgency: args.urgency, items: fullItems, resellerName: reseller?.name ?? null,
+          urgency: urgency, items: fullItems, resellerName: reseller?.name ?? null,
         })
 
         // sheet_url NÃO volta pro modelo de propósito: o link da planilha é interno

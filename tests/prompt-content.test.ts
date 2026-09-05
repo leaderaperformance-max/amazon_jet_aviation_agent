@@ -79,9 +79,10 @@ describe('urgência: nunca sugerir AOG (cliente fala primeiro)', () => {
     expect(agentSrc).toContain('qual a urgência para o recebimento da peça?')
     expect(agentSrc).toContain('NUNCA OFEREÇA AS OPÇÕES "AOG OU ROTINA" AO CLIENTE')
   })
-  it('só classifica AOG se o cliente falar espontaneamente; pressa = rotina', () => {
-    expect(agentSrc).toContain('Só classifique como AOG se o PRÓPRIO CLIENTE disser espontaneamente')
-    expect(agentSrc).toContain('Pressa NÃO é AOG')
+  it('AOG só com a sigla escrita pelo cliente; urgência/emergência = rotina', () => {
+    expect(agentSrc).toContain('Só classifique como AOG se o PRÓPRIO CLIENTE escrever a sigla')
+    expect(agentSrc).toContain('NUNCA deduza AOG')
+    expect(agentSrc).toContain('AOG (SÓ com a sigla)')
   })
 })
 
