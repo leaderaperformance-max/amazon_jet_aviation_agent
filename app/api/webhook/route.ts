@@ -4,9 +4,11 @@ import { upsertContact } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { type ChatwootAttachment } from '@/lib/media/process'
-import { insertPending } from '@/lib/debounce'
+import { insertPending, completePending, releasePending } from '@/lib/debounce'
 import { isQStashEnabled, scheduleDrain } from '@/lib/qstash'
 import { processIncomingMessage, drainAndBuildContent, type IncomingContext } from '@/lib/process-incoming'
+import { isEchoOfOwnMessage } from '@/lib/human-handoff'
+import { isReactivationCommand, reactivateAI } from '@/lib/ia-reactivation'
 
 // Webhook fica curto: recebe, enfileira, retorna. Processamento pesado vai
 // pro worker (/api/process-pending) via QStash. maxDuration baixo é suficiente.
@@ -23,25 +25,59 @@ interface ChatwootSender {
 interface ChatwootMessage {
   id?: number
   content?: string | null
-  message_type?: number
+  message_type?: number | string
   conversation_id?: number
   sender_type?: 'Contact' | 'User' | 'AgentBot'
+  private?: boolean
   sender?: ChatwootSender
 }
 
 interface ChatwootConversation {
   id?: number
+  inbox_id?: number
   labels?: string[]
+  meta?: { sender?: ChatwootSender }
 }
 
 interface RawPayload {
   body?: RawPayload
+  event?: string
   id?: number
   inbox_id?: number
+  // Formato do webhook da CONTA (message_created): a mensagem vem no topo.
+  content?: string | null
+  private?: boolean
+  sender?: ChatwootSender
+  inbox?: { id?: number }
   messages?: ChatwootMessage[]
   conversation?: ChatwootConversation
   labels?: string[]
   meta?: { sender?: ChatwootSender }
+}
+
+/**
+ * Notas privadas só chegam pelo webhook da CONTA (evento message_created, mensagem no
+ * topo do payload). A automação "msg-nova" nunca manda nota: o messages[0] dela é sempre
+ * a última mensagem PÚBLICA. Converte a nota pro formato da automação pra seguir o fluxo
+ * normal (dedup, sessão) até o tratamento de nota privada. Os demais eventos desse
+ * formato continuam ignorados (não têm inbox_id no topo), como sempre foram.
+ */
+function adaptPrivateNoteEvent(d: RawPayload): RawPayload {
+  if (d.event !== 'message_created' || d.private !== true) return d
+  return {
+    inbox_id: d.inbox?.id ?? d.conversation?.inbox_id,
+    id: d.conversation?.id,
+    labels: d.conversation?.labels,
+    meta: d.conversation?.meta,
+    messages: [{
+      id: d.id,
+      content: d.content,
+      private: true,
+      sender_type: 'User',
+      sender: d.sender,
+      conversation_id: d.conversation?.id,
+    }],
+  }
 }
 
 function extractChatId(identifier?: string, phoneNumber?: string | null): string | null {
@@ -58,7 +94,7 @@ function extractChatId(identifier?: string, phoneNumber?: string | null): string
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const raw: RawPayload = await req.json()
-  const data: RawPayload = raw.body ?? raw
+  const data: RawPayload = adaptPrivateNoteEvent(raw.body ?? raw)
 
   console.log(`[webhook] RAW: ${JSON.stringify(raw).slice(0, 800)}`)
 
@@ -128,6 +164,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const labels = data.conversation?.labels ?? data.labels ?? []
 
+  // --- Nota privada: nunca entra na memória da IA nem gera resposta. ---
+  // Única exceção: "#ia" = atendente devolvendo a conversa pra IA antes das 24h de pausa.
+  if (message.private) {
+    if (!isReactivationCommand(message.content)) {
+      console.log(`[webhook] SKIP: nota privada conv=${conversationId}`)
+      return NextResponse.json({ ok: true, skipped: 'private_note' })
+    }
+    try {
+      await reactivateAI({
+        sessionId, conversationId, labels,
+        chatwootCfg: {
+          baseUrl: inbox.chatwoot_base_url,
+          accountId: inbox.chatwoot_account_id,
+          userToken: inbox.chatwoot_user_token,
+        },
+        by: message.sender?.name ?? null,
+      })
+      console.log(`[webhook] IA reativada via nota privada #ia session=${sessionId} conv=${conversationId}`)
+      return NextResponse.json({ ok: true, reactivated: true })
+    } catch (err) {
+      console.error(`[webhook] reativação #ia falhou session=${sessionId}:`, err)
+      return NextResponse.json({ ok: false, error: 'reactivation failed' })
+    }
+  }
+
   // Anexos NÃO são extraídos aqui — guardamos a referência e o worker
   // (process-pending, 60s) baixa+extrai depois do debounce, em paralelo.
   // Isso evita timeout do webhook com PDFs pesados e agrupa múltiplos PDFs.
@@ -156,6 +217,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       last_message: textContent || '[anexo]',
       last_message_at: new Date().toISOString(),
     })
+    // Eco de mensagem que o PRÓPRIO sistema enviou pela API do Chatwoot (contato proativo
+    // com o cliente do consultor, respostas do Site/Instagram): volta como "User", mas não
+    // é atendente. Salvar como [atendente] tiraria a IA da conversa por 24h à toa.
+    if (await isEchoOfOwnMessage(sessionId, textContent)) {
+      console.log(`[webhook] SKIP: eco de mensagem do próprio sistema session=${sessionId}`)
+      return NextResponse.json({ ok: true, skipped: 'system_echo' })
+    }
     await saveMessage(sessionId, 'user', `[atendente]: ${textContent}`)
     console.log(`[webhook] DONE: atendente message saved, no reply`)
     return NextResponse.json({ ok: true })
@@ -209,11 +277,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // FALLBACK (sem QStash): drena + extrai anexos + processa na hora.
+  // Falhou antes da resposta → devolve pra fila (a próxima mensagem da sessão reprocessa).
   try {
-    const { content, context } = await drainAndBuildContent(sessionId)
+    const { content, context, ids, attempt } = await drainAndBuildContent(sessionId)
+    let replied = false
     if (content.trim() && context) {
-      await processIncomingMessage(inbox, context, content)
+      try {
+        await processIncomingMessage(inbox, context, content, {
+          reprocessing: attempt > 1,
+          onReplySent: async () => { replied = true; await completePending(ids) },
+        })
+      } catch (err) {
+        if (!replied) await releasePending(ids).catch(() => {})
+        throw err
+      }
     }
+    if (!replied) await completePending(ids)
   } catch (err) {
     console.error(`[webhook] inline process error:`, err)
   }

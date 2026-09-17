@@ -36,6 +36,17 @@ export async function reachOutToClient(input: {
   const text = buildProactiveMessage({
     clientName: input.clientName, resellerName: input.resellerName, items: input.items,
   })
+  // Semeia a memória do cliente ANTES de enviar (best-effort). A mensagem enviada pela API
+  // do Chatwoot volta pelo webhook como se fosse de um atendente; o webhook reconhece o
+  // eco comparando com esta memória — se o save viesse depois, o eco podia chegar antes
+  // e tirar a IA da conversa do cliente por 24h. NOTA: memória é keyada por sessionId
+  // (= senderIdent do WhatsApp), que pode diferir do telefone normalizado. O mecanismo
+  // CONFIÁVEL de contexto é o buildQuoteContextDirective (keyado por telefone).
+  try {
+    await saveMessage(input.clientPhone, 'assistant', text)
+  } catch (e) {
+    console.warn(`[proactive] saveMessage falhou (não fatal): ${(e as Error).message?.slice(0, 150)}`)
+  }
   try {
     const { conversationId } = await ensureClientConversation(input.chatwootCfg, {
       phone: input.clientPhone, name: input.clientName, inboxId: input.inboxId,
@@ -55,9 +66,4 @@ export async function reachOutToClient(input: {
       await sendMessage(input.quepasaCfg, input.clientPhone, text)
     }
   }
-  // Semeia a memória do cliente (best-effort). NOTA: memória é keyada por sessionId
-  // (= senderIdent do WhatsApp), que pode diferir do telefone normalizado. O mecanismo
-  // CONFIÁVEL de contexto é o buildQuoteContextDirective (keyado por telefone). Este save
-  // é um complemento pro histórico ficar coerente se as chaves casarem.
-  await saveMessage(input.clientPhone, 'assistant', text)
 }

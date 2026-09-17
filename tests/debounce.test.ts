@@ -115,41 +115,42 @@ describe('hasNewerPending', () => {
 
 describe('drainPending', () => {
   it('combines multiple pending messages with \\n\\n separator', async () => {
-    // RPC fails so fallback path is used
-    rpcResult = { data: null, error: { message: 'rpc not found' } }
-    selectResult = {
+    // Claim via função SQL claim_pending_messages (aluguel): devolve as linhas livres.
+    rpcResult = {
       data: [
-        { id: 'id-1', content: 'first message', received_at: '2026-05-18T10:00:00Z' },
-        { id: 'id-2', content: 'second message', received_at: '2026-05-18T10:00:05Z' },
+        { id: 'id-1', content: 'first message', received_at: '2026-05-18T10:00:00Z', context: null, attempts: 1 },
+        { id: 'id-2', content: 'second message', received_at: '2026-05-18T10:00:05Z', context: null, attempts: 1 },
       ],
       error: null,
     }
-    updateResult = { data: null, error: null }
 
     const result = await drainPending('session-abc')
     expect(result.ids).toEqual(['id-1', 'id-2'])
     expect(result.combinedContent).toBe('first message\n\nsecond message')
+    expect(result.attempt).toBe(1)
   })
 
   it('returns empty combinedContent when no pending messages', async () => {
-    rpcResult = { data: null, error: { message: 'rpc not found' } }
-    selectResult = { data: [], error: null }
-    updateResult = { data: null, error: null }
+    rpcResult = { data: [], error: null }
 
     const result = await drainPending('session-abc')
     expect(result.ids).toEqual([])
     expect(result.combinedContent).toBe('')
   })
 
+  it('erro no claim propaga (o worker responde 500 e o QStash tenta de novo)', async () => {
+    rpcResult = { data: null, error: { message: 'db down' } }
+    await expect(drainPending('session-abc')).rejects.toBeTruthy()
+  })
+
   it('retorna o context da última mensagem', async () => {
-    selectResult = {
+    rpcResult = {
       data: [
-        { id: 'r1', content: 'msg a', received_at: '2026-05-18T10:00:00Z', context: { conversationId: 1 } },
-        { id: 'r2', content: 'msg b', received_at: '2026-05-18T10:00:02Z', context: { conversationId: 2 } },
+        { id: 'r1', content: 'msg a', received_at: '2026-05-18T10:00:00Z', context: { conversationId: 1 }, attempts: 1 },
+        { id: 'r2', content: 'msg b', received_at: '2026-05-18T10:00:02Z', context: { conversationId: 2 }, attempts: 1 },
       ],
       error: null,
     }
-    updateResult = { data: null, error: null }
 
     const result = await drainPending('session-abc')
     expect(result.combinedContent).toBe('msg a\n\nmsg b')

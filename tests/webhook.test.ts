@@ -48,7 +48,18 @@ vi.mock('@/lib/debounce', () => ({
   }),
   hasNewerPending: vi.fn().mockResolvedValue(false),
   drainPending: vi.fn().mockImplementation(async () => ({ ids: ['p1'], combinedContent: lastInsertedContent, context: lastInsertedContext, attachments: [] })),
+  completePending: vi.fn().mockResolvedValue(undefined),
+  releasePending: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock('@/lib/human-handoff', () => ({
+  isEchoOfOwnMessage: vi.fn().mockResolvedValue(false),
+  REACTIVATIONS_TABLE: 'ia_reactivations',
+}))
+// Regex do comando é a real; só a gravação/Chatwoot é mockada.
+vi.mock('@/lib/ia-reactivation', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ia-reactivation')>('@/lib/ia-reactivation')
+  return { ...actual, reactivateAI: vi.fn().mockResolvedValue(undefined) }
+})
 vi.mock('@/lib/leads', () => ({
   createLead: vi.fn().mockResolvedValue({ id: 'lead-1' }),
 }))
@@ -61,7 +72,7 @@ vi.mock('@/lib/qstash', () => ({
 vi.mock('@/lib/process-incoming', () => ({
   processIncomingMessage: vi.fn().mockResolvedValue(undefined),
   drainAndBuildContent: vi.fn().mockImplementation(async () => ({
-    content: lastInsertedContent, context: lastInsertedContext, count: 1,
+    content: lastInsertedContent, context: lastInsertedContext, count: 1, ids: ['p1'], attempt: 1,
   })),
 }))
 
@@ -73,7 +84,9 @@ import { upsertContact } from '@/lib/contacts'
 import { saveMessage } from '@/lib/memory'
 import { addLabel } from '@/lib/tags'
 import { processIncomingMessage, drainAndBuildContent } from '@/lib/process-incoming'
-import { insertPending } from '@/lib/debounce'
+import { insertPending, completePending, releasePending } from '@/lib/debounce'
+import { isEchoOfOwnMessage } from '@/lib/human-handoff'
+import { reactivateAI } from '@/lib/ia-reactivation'
 
 const mockRunAgent = runAgent as ReturnType<typeof vi.fn>
 const mockSendMessage = sendMessage as ReturnType<typeof vi.fn>
@@ -200,3 +213,82 @@ describe('POST /api/webhook (roteamento — fila QStash)', () => {
     expect(mockProcessIncoming).not.toHaveBeenCalled()
   })
 })
+
+describe('atendente humano × eco do sistema × notas privadas', () => {
+  it('eco de mensagem enviada pelo próprio sistema NÃO vira [atendente] (não tira a IA da conversa)', async () => {
+    ;(isEchoOfOwnMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
+    await POST(makeRequest(incomingFromHuman))
+    expect(mockSaveMessage).not.toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
+  })
+
+  it('nota privada comum (automação) → ignorada: não entra na memória nem gera resposta', async () => {
+    const p = {
+      ...incomingFromHuman,
+      messages: [{ ...incomingFromHuman.messages[0], id: 3, private: true, content: 'cliente chato, cuidado com o preço' }],
+    }
+    await POST(makeRequest(p))
+    expect(mockSaveMessage).not.toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
+    expect(reactivateAI).not.toHaveBeenCalled()
+  })
+
+  // Formato real do webhook da CONTA (evento message_created): a mensagem vem no topo.
+  const accountNote = (content: string, isPrivate = true) => ({
+    event: 'message_created',
+    id: 1453001,
+    content,
+    private: isPrivate,
+    message_type: 'outgoing',
+    sender: { id: 128, name: 'Alessandra Gomes', type: 'user' },
+    inbox: { id: 45, name: 'Amazon Jet Aviation - WPP' },
+    conversation: {
+      id: 304,
+      inbox_id: 45,
+      labels: ['atendimento_ia'],
+      meta: { sender: { id: 74762, name: 'Engenheiro Rocha', identifier: '5562984689607@s.whatsapp.net', phone_number: '+5562984689607' } },
+    },
+  })
+
+  it('nota privada "#ia" (webhook da conta) → reativa a IA naquela conversa', async () => {
+    const res = await POST(makeRequest(accountNote('#ia')))
+    expect(res.status).toBe(200)
+    expect(reactivateAI).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: '5562984689607@s.whatsapp.net',
+      conversationId: 304,
+      labels: ['atendimento_ia'],
+      by: 'Alessandra Gomes',
+    }))
+    expect(mockSaveMessage).not.toHaveBeenCalled() // o comando não vai pra memória da IA
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
+  })
+
+  it('nota privada sem o comando (webhook da conta) → ignorada', async () => {
+    await POST(makeRequest(accountNote('liguei pro cliente, retorna amanhã')))
+    expect(reactivateAI).not.toHaveBeenCalled()
+    expect(mockSaveMessage).not.toHaveBeenCalled()
+  })
+
+  it('mensagem PÚBLICA no formato do webhook da conta continua ignorada (a automação já entrega)', async () => {
+    await POST(makeRequest(accountNote('#ia', false)))
+    expect(reactivateAI).not.toHaveBeenCalled()
+    expect(mockSaveMessage).not.toHaveBeenCalled()
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
+  })
+})
+
+describe('fallback sem QStash: fila sem perda', () => {
+  it('processou → conclui as linhas', async () => {
+    await POST(makeRequest(incomingFromContact))
+    expect(completePending).toHaveBeenCalledWith(['p1'])
+    expect(releasePending).not.toHaveBeenCalled()
+  })
+
+  it('falhou antes de responder → devolve as linhas pra fila', async () => {
+    mockProcessIncoming.mockRejectedValueOnce(new Error('openai 500'))
+    await POST(makeRequest(incomingFromContact))
+    expect(releasePending).toHaveBeenCalledWith(['p1'])
+    expect(completePending).not.toHaveBeenCalled()
+  })
+})
+

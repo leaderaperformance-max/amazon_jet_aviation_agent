@@ -50,44 +50,111 @@ export async function hasNewerPending(sessionId: string, after: string): Promise
   return (data?.length ?? 0) > 0
 }
 
-export async function drainPending(
-  sessionId: string
-): Promise<{ ids: string[]; combinedContent: string; context: unknown; attachments: unknown[] }> {
+/**
+ * Aluguel do claim, em segundos. Maior que o maxDuration do worker (60s): enquanto uma
+ * tentativa pode estar viva, nenhuma outra pega as mesmas linhas.
+ */
+export const PENDING_LEASE_SECONDS = 70
+
+/**
+ * A partir desta tentativa os anexos ficam de fora: um anexo que sempre estoura o tempo
+ * não pode deixar o cliente sem resposta pra sempre.
+ */
+export const SKIP_ATTACHMENTS_FROM_ATTEMPT = 3
+
+interface PendingRow {
+  id: string
+  content: string
+  received_at: string
+  context: { attachments?: unknown[] } | null
+  attempts: number | null
+}
+
+export async function drainPending(sessionId: string): Promise<{
+  ids: string[]
+  combinedContent: string
+  context: unknown
+  attachments: unknown[]
+  /** Maior nº de tentativas entre as linhas (1 = primeira vez). */
+  attempt: number
+  /** Anexos deixados de fora por já terem falhado em tentativas anteriores. */
+  skippedAttachments: number
+}> {
   const supabase = getAdminClient()
 
-  // Reivindica as pendentes ATOMICAMENTE: um único UPDATE ... RETURNING marca
-  // processed=true e devolve as linhas. Se dois drains concorrerem (QStash entrega
-  // o callback mais de uma vez), só UM pega as linhas — o outro volta vazio.
-  // Evita o processamento/resposta duplicada.
-  const { data: rows, error: claimErr } = await supabase
-    .from('pending_messages')
-    .update({ processed: true })
-    .eq('session_id', sessionId)
-    .eq('processed', false)
-    .select('id, content, received_at, context')
+  // Reivindica ATOMICAMENTE (função SQL claim_pending_messages): marca claimed_at e
+  // devolve as linhas livres. Dois drains concorrentes (QStash entrega o callback mais
+  // de uma vez) nunca pegam a mesma linha. NÃO marca processed — isso só acontece em
+  // completePending, depois que a IA respondeu. Se o worker morrer no meio, o aluguel
+  // vence e o retry reprocessa (antes a mensagem se perdia).
+  const { data: rows, error: claimErr } = await supabase.rpc('claim_pending_messages', {
+    p_session_id: sessionId,
+    p_lease_seconds: PENDING_LEASE_SECONDS,
+  })
 
   if (claimErr) throw claimErr
 
-  const sorted = (rows ?? []).slice().sort(
-    (a: { received_at: string }, b: { received_at: string }) =>
-      a.received_at.localeCompare(b.received_at)
+  const sorted = ((rows ?? []) as PendingRow[]).slice().sort(
+    (a, b) => a.received_at.localeCompare(b.received_at)
   )
-  const ids = sorted.map((r: { id: string }) => r.id)
+  const ids = sorted.map(r => r.id)
 
   // Junta só o texto (não-vazio) com separador
   const combinedContent = sorted
-    .map((r: { content: string }) => r.content)
-    .filter((c: string) => c && c.trim())
+    .map(r => r.content)
+    .filter(c => c && c.trim())
     .join('\n\n')
 
-  // Agrega anexos de TODAS as linhas (cada mensagem pode ter trazido PDFs)
+  // Agrega anexos de TODAS as linhas (cada mensagem pode ter trazido PDFs), exceto os
+  // de linhas que já falharam vezes demais.
   const attachments: unknown[] = []
+  let attempt = 0
+  let skippedAttachments = 0
   for (const r of sorted) {
-    const c = (r as { context?: { attachments?: unknown[] } }).context
-    if (c?.attachments && Array.isArray(c.attachments)) attachments.push(...c.attachments)
+    const tries = r.attempts ?? 1
+    attempt = Math.max(attempt, tries)
+    const atts = r.context?.attachments
+    if (!Array.isArray(atts) || atts.length === 0) continue
+    if (tries >= SKIP_ATTACHMENTS_FROM_ATTEMPT) skippedAttachments += atts.length
+    else attachments.push(...atts)
   }
 
   // Context da ÚLTIMA mensagem (labels/sender mais atuais)
-  const context = sorted.length > 0 ? (sorted[sorted.length - 1] as { context: unknown }).context : null
-  return { ids, combinedContent, context, attachments }
+  const context = sorted.length > 0 ? sorted[sorted.length - 1].context : null
+  return { ids, combinedContent, context, attachments, attempt, skippedAttachments }
+}
+
+/** A IA respondeu: as linhas saem da fila de vez. */
+export async function completePending(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await getAdminClient()
+    .from('pending_messages')
+    .update({ processed: true })
+    .in('id', ids)
+  if (error) throw error
+}
+
+/** O processamento falhou ANTES da resposta: devolve as linhas pra fila (retry reprocessa). */
+export async function releasePending(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await getAdminClient()
+    .from('pending_messages')
+    .update({ claimed_at: null })
+    .in('id', ids)
+    .eq('processed', false)
+  if (error) throw error
+}
+
+/** Outra tentativa está com linhas dessa sessão alugadas agora (em andamento)? */
+export async function hasInFlightPending(sessionId: string): Promise<boolean> {
+  const cutoff = new Date(Date.now() - PENDING_LEASE_SECONDS * 1000).toISOString()
+  const { data, error } = await getAdminClient()
+    .from('pending_messages')
+    .select('id')
+    .eq('session_id', sessionId)
+    .eq('processed', false)
+    .gt('claimed_at', cutoff)
+    .limit(1)
+  if (error) throw error
+  return (data?.length ?? 0) > 0
 }

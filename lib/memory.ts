@@ -54,6 +54,29 @@ export async function loadHistory(sessionId: string): Promise<MemoryMessage[]> {
   })
 }
 
+/**
+ * Reprocessamento de mensagem que falhou no meio: o turno do cliente já foi salvo pela
+ * tentativa anterior? (Evita o mesmo texto duas vezes no histórico que o modelo lê.)
+ */
+export async function recentUserMessageExists(
+  sessionId: string,
+  content: string,
+  withinMinutes = 120,
+): Promise<boolean> {
+  const since = new Date(Date.now() - withinMinutes * 60_000).toISOString()
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('message')
+    .eq('session_id', sessionId)
+    .gt('created_at', since)
+    .order('id', { ascending: false })
+    .limit(20)
+  if (error || !data) return false
+  return (data as Array<{ message?: { type?: string; content?: string } }>).some(
+    r => r.message?.type === 'human' && r.message?.content === content,
+  )
+}
+
 export async function saveMessage(
   sessionId: string,
   role: 'user' | 'assistant',

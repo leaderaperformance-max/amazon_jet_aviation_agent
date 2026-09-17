@@ -5,7 +5,7 @@ import { sendMessage } from '@/lib/quepasa'
 import { sendChatwootReply } from '@/lib/chatwoot-send'
 import { loadOpenAIConfig } from '@/lib/inboxes'
 import { upsertContact, updateContactLabels } from '@/lib/contacts'
-import { saveMessage } from '@/lib/memory'
+import { saveMessage, recentUserMessageExists } from '@/lib/memory'
 import { addLabel, removeLabel } from '@/lib/tags'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { BUSINESS_LABELS, SYSTEM_LABEL } from '@/lib/types'
@@ -26,6 +26,7 @@ import { buildGroupMessage, buildQuoteConfirmation } from '@/lib/quote-messages'
 import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-directives'
 import { reachOutToClient } from '@/lib/proactive-client'
 import { clientSaidAOG } from '@/lib/urgency-guard'
+import { isHumanHandling } from '@/lib/human-handoff'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -56,8 +57,12 @@ export async function drainAndBuildContent(sessionId: string): Promise<{
   content: string
   context: IncomingContext | null
   count: number
+  /** Linhas reivindicadas — o chamador tem que concluir (completePending) ou devolver (releasePending). */
+  ids: string[]
+  /** 1 = primeira tentativa; >1 = reprocessamento depois de falha. */
+  attempt: number
 }> {
-  const { combinedContent, context, attachments, ids } = await drainPending(sessionId)
+  const { combinedContent, context, attachments, ids, attempt, skippedAttachments } = await drainPending(sessionId)
   let content = combinedContent
   const atts = (attachments as ChatwootAttachment[] | undefined) ?? []
 
@@ -78,7 +83,15 @@ export async function drainAndBuildContent(sessionId: string): Promise<{
     console.log(`[drain] ${sessionId}: extraídos ${extracted.length}/${atts.length} anexos`)
   }
 
-  return { content, context: (context as IncomingContext | null), count: ids.length }
+  // Anexo que já derrubou tentativas anteriores fica de fora — o cliente recebe resposta
+  // (a IA pede o PN por texto) em vez de a mensagem travar na fila.
+  if (skippedAttachments > 0) {
+    const note = `[O cliente enviou ${skippedAttachments === 1 ? 'um anexo' : `${skippedAttachments} anexos`} que não conseguimos abrir automaticamente.]`
+    content = content ? `${content}\n\n${note}` : note
+    console.warn(`[drain] ${sessionId}: ${skippedAttachments} anexo(s) ignorado(s) após falhas repetidas (tentativa ${attempt})`)
+  }
+
+  return { content, context: (context as IncomingContext | null), count: ids.length, ids, attempt }
 }
 
 /**
@@ -411,6 +424,15 @@ export async function processIncomingMessage(
   inbox: InboxConfig,
   ctx: IncomingContext,
   content: string,
+  opts: {
+    /** Tentativa anterior falhou no meio: a mensagem do cliente pode já estar na memória. */
+    reprocessing?: boolean
+    /**
+     * Chamado assim que a resposta sai pro cliente. O worker tira a mensagem da fila AQUI
+     * (e não no fim): se algo falhar depois, o retry não manda a resposta de novo.
+     */
+    onReplySent?: () => Promise<void>
+  } = {},
 ): Promise<void> {
   const {
     conversationId, sessionId, senderName, senderPhone, senderIdent,
@@ -430,8 +452,12 @@ export async function processIncomingMessage(
     last_message_at: new Date().toISOString(),
   })
 
-  // Save the (combined) customer message to memory
-  await saveMessage(sessionId, 'user', content)
+  // Save the (combined) customer message to memory. No reprocessamento a tentativa
+  // anterior pode ter salvo antes de falhar — não duplica o turno do cliente.
+  const alreadySaved = !!opts.reprocessing && await recentUserMessageExists(sessionId, content)
+  if (!alreadySaved) {
+    await saveMessage(sessionId, 'user', content)
+  }
 
   // Decide if bot should respond: skip if a human took over and it's not new
   const hasAtendimentoIA = labels.includes(SYSTEM_LABEL)
@@ -463,6 +489,16 @@ export async function processIncomingMessage(
   // ex. "17285006474@s.whatsapp.net") quando o phone_number vem vazio no evento do webhook.
   // Sem esse fallback, um consultor (ex.: Marco Antônio, número US) era tratado como cliente normal.
   const reseller = await findReseller(senderPhone || senderIdent)
+
+  // 🚧 Atendente humano falou com o cliente nas últimas 24h → a IA fica FORA da conversa,
+  // mesmo com a etiqueta atendimento_ia (reclamação real: o atendente respondeu 12:19, o
+  // cliente escreveu 12:22 e a IA respondeu por cima). Nota privada "#ia" traz a IA de volta.
+  // Consultores/revendedores ficam fora da trava: a equipe conversa com eles o tempo todo
+  // e a IA é quem dispara as cotações deles no grupo — pausar 24h perderia cotação.
+  if (!reseller && await isHumanHandling(sessionId)) {
+    console.log(`[process] atendente humano conduzindo conversation=${conversationId} — IA em silêncio (nota privada #ia reativa)`)
+    return
+  }
 
   const { tools, getLabels } = buildAgentTools({
     inbox, conversationId, contactId: contact.id,
@@ -505,8 +541,22 @@ export async function processIncomingMessage(
     await sendChatwootReply(chatwootCfg, conversationId, reply)
   }
 
+  // A resposta JÁ saiu: daqui pra frente nada pode lançar erro — o worker trataria como
+  // falha e devolveria a mensagem pra fila (resposta duplicada pro cliente).
+  if (opts.onReplySent) {
+    try {
+      await opts.onReplySent()
+    } catch (err) {
+      console.warn(`[process] onReplySent falhou (não fatal):`, err)
+    }
+  }
+
   if (!hasAtendimentoIA) {
-    const finalLabels = await addLabel(chatwootCfg, conversationId, getLabels(), SYSTEM_LABEL)
-    await updateContactLabels(contact.id, finalLabels)
+    try {
+      const finalLabels = await addLabel(chatwootCfg, conversationId, getLabels(), SYSTEM_LABEL)
+      await updateContactLabels(contact.id, finalLabels)
+    } catch (err) {
+      console.warn(`[process] etiqueta pós-resposta falhou (não fatal):`, err)
+    }
   }
 }
