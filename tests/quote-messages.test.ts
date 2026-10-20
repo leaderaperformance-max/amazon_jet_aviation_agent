@@ -63,3 +63,23 @@ describe('buildGroupMessage', () => {
     expect(m).not.toContain('via consultor')
   })
 })
+
+describe('disparo no grupo durante atendimento humano', () => {
+  const base = {
+    action: 'enviada' as const, numero: 125, channelLabel: 'WhatsApp',
+    clientName: 'Newton', clientPhone: '5567992975008', urgency: 'rotina',
+    items: [{ part_number: '3244809-8', quantity: '1' }],
+    chatwootUrl: 'https://cw/app/accounts/14/conversations/293',
+  }
+
+  it('avisa o time que o cliente NÃO recebeu resposta da IA', () => {
+    const msg = buildGroupMessage({ ...base, handledByHuman: true })
+    expect(msg).toContain('ATENDIMENTO HUMANO')
+    expect(msg).toContain('precisa dar o retorno')
+    expect(msg).toContain('3244809-8') // a cotação vai completa do mesmo jeito
+  })
+
+  it('fluxo normal não leva esse aviso', () => {
+    expect(buildGroupMessage(base)).not.toContain('ATENDIMENTO HUMANO')
+  })
+})

@@ -27,6 +27,7 @@ import { buildResellerDirective, buildQuoteContextDirective } from '@/lib/agent-
 import { reachOutToClient } from '@/lib/proactive-client'
 import { clientSaidAOG } from '@/lib/urgency-guard'
 import { isHumanHandling } from '@/lib/human-handoff'
+import { mentionsPartNumberCandidate, SILENT_CAPTURE_DIRECTIVE } from '@/lib/quote-capture'
 
 /**
  * Context captured at webhook time and carried through the debounce queue,
@@ -109,8 +110,16 @@ export function buildAgentTools(params: {
   initialLabels: string[]
   sessionId: string
   reseller: { name: string } | null
+  /**
+   * Captura silenciosa (atendente humano na conversa): a IA não fala com o cliente,
+   * só registra a cotação e dispara no grupo. Reduz o conjunto de tools ao essencial —
+   * sem mexer em etiqueta de atendimento e sem chamar_especialista (a conversa JÁ está
+   * com humano; remover a etiqueta de novo ou avisar o grupo seria ruído).
+   */
+  silentMode?: boolean
 }): { tools: Record<string, unknown>; getLabels: () => string[] } {
   const { inbox, conversationId, contactId, senderName, senderPhone, chatwootCfg, sessionId, reseller } = params
+  const silentMode = !!params.silentMode
   let labelsState = [...params.initialLabels]
   const labelEnum = z.enum(BUSINESS_LABELS)
 
@@ -356,7 +365,7 @@ export function buildAgentTools(params: {
             action: decision.action, numero: sol.numero, channelLabel,
             clientName, clientPhone, urgency: urgency, items: fullItems,
             generalNotes: args.general_notes ?? null, resellerName: reseller?.name ?? null,
-            sheetUrl, chatwootUrl,
+            sheetUrl, chatwootUrl, handledByHuman: silentMode,
           })
           groupSent = await sendMessage(quepasaCfg, sellerPhone, sellerMsg)
           if (!groupSent) console.warn(`[envia_pn] grupo NÃO recebeu (gateway?) — solicitação segue não-enviada pra redispatch`)
@@ -412,7 +421,72 @@ export function buildAgentTools(params: {
     }),
   }
 
+  if (silentMode) {
+    const { validate_part_number, extract_part_numbers, envia_pn } = tools
+    return {
+      tools: { validate_part_number, extract_part_numbers, envia_pn },
+      getLabels: () => labelsState,
+    }
+  }
+
   return { tools, getLabels: () => labelsState }
+}
+
+/**
+ * Chave da solicitação do cliente: telefone real → JID da sessão canonicalizado →
+ * sessionId cru (site/email). Tem que ser idêntica nos dois lados senão a dedup fura.
+ */
+function solicitacaoKey(sessionId: string, senderPhone: string | null): string {
+  return toBrazilWhatsApp(senderPhone)
+    || (sessionId.includes('@s.whatsapp.net') ? toBrazilWhatsApp(sessionId) : '')
+    || sessionId
+}
+
+/**
+ * Atendente humano conduzindo a conversa: a IA NÃO fala com o cliente, mas a cotação
+ * vai pro grupo AGORA (antes, esperava os 15 min do resgate automático — ou nunca saía,
+ * quando o atendente tinha falado nas últimas 24h). O texto gerado é descartado.
+ * Best-effort: falhar aqui não pode derrubar o resto do fluxo.
+ */
+async function captureQuoteSilently(p: {
+  inbox: InboxConfig
+  ctx: IncomingContext
+  content: string
+  contactId: string
+  chatwootCfg: { baseUrl: string; accountId: number; userToken: string }
+  reseller: { name: string } | null
+}): Promise<boolean> {
+  const { inbox, ctx, content, contactId, chatwootCfg, reseller } = p
+  if (!mentionsPartNumberCandidate(content)) {
+    console.log(`[captura-silenciosa] ${ctx.sessionId}: mensagem sem Part Number — nada a disparar`)
+    return false
+  }
+  try {
+    const { tools } = buildAgentTools({
+      inbox, conversationId: ctx.conversationId, contactId,
+      senderName: ctx.senderName, senderPhone: ctx.senderPhone, chatwootCfg,
+      initialLabels: ctx.labels, sessionId: ctx.sessionId, reseller, silentMode: true,
+    })
+    const openSol = await getOpenSolicitacao(solicitacaoKey(ctx.sessionId, ctx.senderPhone))
+    const extraContext = [
+      SILENT_CAPTURE_DIRECTIVE,
+      reseller ? buildResellerDirective(reseller.name) : '',
+      openSol ? buildQuoteContextDirective({ numero: openSol.numero, resellerName: openSol.reseller_name, partNumbers: openSol.part_numbers }) : '',
+    ].join('')
+    const openai = await loadOpenAIConfig()
+    // saveAssistantMessage:false — o cliente não recebe nada; salvar faria a IA achar
+    // depois que já tinha falado com ele.
+    await runAgent(
+      ctx.sessionId, content, inbox.system_prompt, openai.apiKey, openai.model,
+      tools, ctx.labels,
+      { extraContext, saveUserMessage: false, saveAssistantMessage: false },
+    )
+    console.log(`[captura-silenciosa] ${ctx.sessionId}: rodou com atendente humano na conversa`)
+    return true
+  } catch (err) {
+    console.error(`[captura-silenciosa] ${ctx.sessionId} falhou (não fatal):`, err)
+    return false
+  }
 }
 
 /**
@@ -459,13 +533,38 @@ export async function processIncomingMessage(
     await saveMessage(sessionId, 'user', content)
   }
 
-  // Decide if bot should respond: skip if a human took over and it's not new
+  const chatwootCfg = {
+    baseUrl: inbox.chatwoot_base_url,
+    accountId: inbox.chatwoot_account_id,
+    userToken: inbox.chatwoot_user_token,
+  }
+
+  // Detecção de revendedor: usa senderPhone e cai pro senderIdent (JID do WhatsApp,
+  // ex. "17285006474@s.whatsapp.net") quando o phone_number vem vazio no evento do webhook.
+  // Sem esse fallback, um consultor (ex.: Marco Antônio, número US) era tratado como cliente normal.
+  const reseller = await findReseller(senderPhone || senderIdent)
+
+  // Dois motivos pra IA não falar com o cliente:
+  //  • handoff — a conversa está sem a etiqueta atendimento_ia (humano assumiu);
+  //  • pausa de 24h — um atendente falou com o cliente há pouco (nota privada "#ia" reativa).
+  // Consultores/revendedores ficam fora da pausa: a equipe conversa com eles o tempo todo
+  // e a IA é quem dispara as cotações deles no grupo — pausar 24h perderia cotação.
   const hasAtendimentoIA = labels.includes(SYSTEM_LABEL)
-  if (!hasAtendimentoIA && !wasNew) {
-    console.log(`[process] handoff: humano assumiu conversation=${conversationId}`)
-    // SLA: se ninguém responder em N min, a IA assume (Parte B do spec)
+  const handoff = !hasAtendimentoIA && !wasNew
+  const pausaHumana = !handoff && !reseller && await isHumanHandling(sessionId)
+
+  if (handoff || pausaHumana) {
+    console.log(`[process] ${handoff ? 'handoff: humano assumiu' : 'atendente humano conduzindo (pausa 24h)'} conversation=${conversationId} — IA calada com o cliente`)
+
+    // 🔑 A IA fica CALADA com o cliente, mas a COTAÇÃO vai pro grupo AGORA.
+    // Antes, a cotação esperava os 15 min do resgate automático (caso Newton, 19/10/2026:
+    // PN às 16:07, grupo só às 16:23) — e na pausa de 24h não chegava nunca.
+    await captureQuoteSilently({ inbox, ctx, content, contactId: contact.id, chatwootCfg, reseller })
+
+    // SLA: se ninguém responder em N min, a IA assume (Parte B do spec). Só no handoff —
+    // na pausa de 24h quem está conduzindo é um humano de propósito.
     const slaEnabled = (process.env.SLA_TAKEOVER_ENABLED ?? 'true') === 'true'
-    if (slaEnabled && isQStashEnabled() && !!inbox.quepasa_host && !!inbox.quepasa_token) {
+    if (handoff && slaEnabled && isQStashEnabled() && !!inbox.quepasa_host && !!inbox.quepasa_token) {
       const min = parseInt(process.env.SLA_TAKEOVER_MIN ?? '15', 10)
       try {
         await scheduleSlaTakeover(sessionId, new Date().toISOString(), min * 60, { conversationId, chatwootInboxId: ctx.chatwootInboxId })
@@ -479,27 +578,6 @@ export async function processIncomingMessage(
   const useQuepasa = !!(inbox.quepasa_host && inbox.quepasa_token)
   console.log(`[process] inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA} outbound=${useQuepasa ? 'quepasa' : 'chatwoot'}`)
 
-  const chatwootCfg = {
-    baseUrl: inbox.chatwoot_base_url,
-    accountId: inbox.chatwoot_account_id,
-    userToken: inbox.chatwoot_user_token,
-  }
-
-  // Detecção de revendedor: usa senderPhone e cai pro senderIdent (JID do WhatsApp,
-  // ex. "17285006474@s.whatsapp.net") quando o phone_number vem vazio no evento do webhook.
-  // Sem esse fallback, um consultor (ex.: Marco Antônio, número US) era tratado como cliente normal.
-  const reseller = await findReseller(senderPhone || senderIdent)
-
-  // 🚧 Atendente humano falou com o cliente nas últimas 24h → a IA fica FORA da conversa,
-  // mesmo com a etiqueta atendimento_ia (reclamação real: o atendente respondeu 12:19, o
-  // cliente escreveu 12:22 e a IA respondeu por cima). Nota privada "#ia" traz a IA de volta.
-  // Consultores/revendedores ficam fora da trava: a equipe conversa com eles o tempo todo
-  // e a IA é quem dispara as cotações deles no grupo — pausar 24h perderia cotação.
-  if (!reseller && await isHumanHandling(sessionId)) {
-    console.log(`[process] atendente humano conduzindo conversation=${conversationId} — IA em silêncio (nota privada #ia reativa)`)
-    return
-  }
-
   const { tools, getLabels } = buildAgentTools({
     inbox, conversationId, contactId: contact.id,
     senderName, senderPhone, chatwootCfg, initialLabels: labels,
@@ -509,12 +587,7 @@ export async function processIncomingMessage(
   // Contexto extra pro agente: origem revendedor + estado da solicitação aberta do cliente.
   // A solicitação é keyada por telefone NORMALIZADO (não por sessionId) → robusto ao formato
   // do identificador. Este é o mecanismo confiável de "o agente lembra do contexto".
-  // Mesma canonicalização do envia_pn: senderPhone → JID da sessão canonicalizado →
-  // sessionId cru (site/email). Chaves têm que bater nos dois lados senão a dedup fura.
-  const ctxKey = toBrazilWhatsApp(senderPhone)
-    || (sessionId.includes('@s.whatsapp.net') ? toBrazilWhatsApp(sessionId) : '')
-    || sessionId
-  const openSol = await getOpenSolicitacao(ctxKey)
+  const openSol = await getOpenSolicitacao(solicitacaoKey(sessionId, senderPhone))
   const extraContext = [
     reseller ? buildResellerDirective(reseller.name) : '',
     openSol ? buildQuoteContextDirective({ numero: openSol.numero, resellerName: openSol.reseller_name, partNumbers: openSol.part_numbers }) : '',

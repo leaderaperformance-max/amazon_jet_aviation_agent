@@ -45,6 +45,8 @@ export function buildGroupMessage(input: {
   resellerName?: string | null
   sheetUrl?: string | null
   chatwootUrl: string
+  /** Captura silenciosa: atendente humano conduz a conversa e o cliente NÃO recebeu confirmação da IA. */
+  handledByHuman?: boolean
 }): string {
   const header = input.action === 'enviada'
     ? `🆕 *SOLICITAÇÃO ${formatNumero(input.numero)}*`
@@ -57,9 +59,14 @@ export function buildGroupMessage(input: {
   const itemsBlock = input.items.length === 1
     ? `🔧 *Part Number:* ${input.items[0].part_number}\n🔢 *Quantidade:* ${input.items[0].quantity}${input.items[0].notes ? `\n📝 ${input.items[0].notes}` : ''}`
     : `📋 *ITENS (${input.items.length}):*\n` + input.items.map((it, i) => `  ${i + 1}. ${it.part_number} — Qtd: ${it.quantity}${it.notes ? ` (${it.notes})` : ''}`).join('\n')
+  // O time precisa saber que ninguém respondeu o cliente — a IA ficou calada de propósito.
+  const humanNote = input.handledByHuman
+    ? '⚠️ _Conversa em ATENDIMENTO HUMANO: a IA não respondeu o cliente. Alguém do time precisa dar o retorno._'
+    : null
   return [
     header,
-    subheader, '',
+    subheader,
+    humanNote, '',
     `📡 *Origem:* ${input.channelLabel}`,
     `👤 *Cliente:* ${input.clientName ?? '(sem nome)'}`,
     input.clientPhone ? `📱 *WhatsApp:* ${input.clientPhone}` : null,

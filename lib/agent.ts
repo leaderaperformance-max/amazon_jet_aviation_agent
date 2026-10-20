@@ -35,7 +35,7 @@ export async function runAgent(
   openaiModel: string,
   tools?: Record<string, unknown>,
   currentLabels: string[] = [],
-  opts: { saveUserMessage?: boolean; extraContext?: string } = {},
+  opts: { saveUserMessage?: boolean; saveAssistantMessage?: boolean; extraContext?: string } = {},
 ): Promise<string> {
   const history: MemoryMessage[] = await loadHistory(sessionId)
   const messages = [...history, { role: 'user' as const, content: userMessage }]
@@ -123,7 +123,12 @@ export async function runAgent(
     console.warn(`[agent] ⛔ PRAZO DE ENTREGA bloqueado na resposta — trocado pela mensagem padrão. Original: ${safeText.slice(0, 200)}`)
   }
 
-  await saveMessage(sessionId, 'assistant', guarded.text)
+  // saveAssistantMessage:false — captura silenciosa (atendente humano na conversa):
+  // o texto é descartado, nunca chega ao cliente. Se fosse salvo, a IA depois agiria
+  // como se tivesse dito algo que o cliente nunca viu.
+  if (opts.saveAssistantMessage !== false) {
+    await saveMessage(sessionId, 'assistant', guarded.text)
+  }
 
   return guarded.text
 }
