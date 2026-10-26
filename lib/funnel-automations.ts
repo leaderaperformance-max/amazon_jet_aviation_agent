@@ -4,9 +4,9 @@ import { loadHistory, saveMessage } from '@/lib/memory'
 import { loadOpenAIConfig } from '@/lib/inboxes'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { sendMessage } from '@/lib/quepasa'
-import { resolveFunnel, listFunnelItems, type ChatwootCfg, type FunnelItem } from '@/lib/chatwoot/funnel'
+import { resolveFunnel, listFunnelItems, type ChatwootCfg, type FunnelItem, type FunnelStep } from '@/lib/chatwoot/funnel'
 
-export type StageKey = 'leads_novos' | 'orcamento_enviado' | 'venda_fechada'
+export type StageKey = 'leads_novos' | 'orcamento_pendente' | 'orcamento_enviado' | 'venda_fechada'
 
 const COMMON = `Você é o JET, SDR consultivo especialista em peças aeronáuticas da Amazon Jet Aviation.
 Releia o histórico. Cite o Part Number / nome do cliente se aparecerem — NUNCA invente.
@@ -16,6 +16,7 @@ Saída: SOMENTE a mensagem pronta pro cliente. Sem prefixos, sem aspas.`
 
 export const STAGE_PROMPTS: Record<StageKey, string> = {
   leads_novos: `${COMMON}\n\nContexto: o pedido do cliente está em cotação e ainda não saiu o orçamento. Tranquilize que a equipe segue buscando o melhor fornecedor/condição e mantenha o lead aquecido. Faça UMA pergunta consultiva leve (ex.: confirmar urgência/aeronave) se fizer sentido.`,
+  orcamento_pendente: `${COMMON}\n\nContexto: a cotação do cliente está EM ANDAMENTO com a equipe e ainda não saiu o orçamento — ele está esperando o preço. NUNCA pergunte se ele avaliou a cotação nem fale como se o orçamento já tivesse sido enviado. Tranquilize que seguimos buscando a melhor condição junto aos fornecedores e, se fizer sentido, confirme UM dado que acelera a cotação (urgência, condição da peça, aeronave).`,
   orcamento_enviado: `${COMMON}\n\nContexto: a cotação JÁ foi enviada e o cliente não respondeu. Retome a dor, reforce o valor e pergunte se conseguiu avaliar a cotação ou se precisa de ajuste em condição/lead time.`,
   venda_fechada: `${COMMON}\n\nContexto: este cliente JÁ comprou (venda fechada). É uma reativação pós-venda: agradeça a parceria e abra espaço pra uma nova cotação/necessidade, sem ser invasivo.`,
 }
@@ -105,12 +106,28 @@ export async function processFunnelItem(
   }
 }
 
-const STAGE_BY_SLOT: Record<'start' | 'middle' | 'end', StageKey> = {
-  start: 'leads_novos', middle: 'orcamento_enviado', end: 'venda_fechada',
+/**
+ * Texto do follow-up pelo NOME da coluna, não pelo tipo. O kanban tem duas colunas
+ * 'middle' que são situações opostas: em 'Orçamento Pendente' o cliente ainda espera
+ * o preço, e perguntar "conseguiu avaliar a cotação?" ali é falar de um orçamento que
+ * nunca chegou. Coluna do meio desconhecida cai no texto neutro de cotação em
+ * andamento — nunca afirma que a cotação saiu.
+ */
+export function stageForStep(step: FunnelStep): StageKey {
+  const key = `${step.identifier ?? ''} ${step.title ?? ''}`
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  if (key.includes('pendente')) return 'orcamento_pendente'
+  if (key.includes('enviado')) return 'orcamento_enviado'
+  if (key.includes('fechada') || key.includes('ganh')) return 'venda_fechada'
+  if (key.includes('lead') || key.includes('novo')) return 'leads_novos'
+  if (step.step_type === 'start') return 'leads_novos'
+  if (step.step_type === 'end') return 'venda_fechada'
+  return 'orcamento_pendente'
 }
 
 function thresholdSecFor(stage: StageKey): number {
   if (stage === 'leads_novos') return parseInt(process.env.FUNNEL_LEADS_NOVOS_HORAS ?? '24', 10) * 3600
+  if (stage === 'orcamento_pendente') return parseInt(process.env.FUNNEL_ORCAMENTO_PENDENTE_HORAS ?? '24', 10) * 3600
   if (stage === 'orcamento_enviado') return parseInt(process.env.FUNNEL_ORCAMENTO_HORAS ?? '24', 10) * 3600
   return parseInt(process.env.FUNNEL_VENDA_FECHADA_DIAS ?? '15', 10) * 86_400
 }
@@ -133,15 +150,11 @@ export async function runFunnelAutomations(
   if (!funnel) return { resolved: false, checked: 0, sent: 0 }
 
   let checked = 0, sent = 0
-  for (const slot of ['start', 'middle', 'end'] as const) {
-    const stage = STAGE_BY_SLOT[slot]
-    // TODAS as etapas desse tipo: o kanban tem duas etapas 'middle' e a versão antiga
-    // só olhava a primeira, deixando uma coluna inteira de cards sem follow-up.
-    const stepIds = funnel.stepsByType?.[slot] ?? [funnel.steps[slot]]
+  // Uma coluna de cada vez, com o texto da própria coluna.
+  for (const step of funnel.stepList) {
+    const stage = stageForStep(step)
     const threshold = thresholdSecFor(stage)
-    const items = (await Promise.all(
-      stepIds.map(stepId => listFunnelItems(cfg, funnel.funnelId, stepId)),
-    )).flat()
+    const items = await listFunnelItems(cfg, funnel.funnelId, step.id)
 
     for (const item of items) {
       checked++
@@ -161,7 +174,7 @@ export async function runFunnelAutomations(
 
       const r = await processFunnelItem(item, stage, inbox)
       if (r.sent) sent++
-      console.log(`[funnel] item=${item.id} stage=${stage} sent=${r.sent}${r.error ? ` err=${r.error}` : ''}`)
+      console.log(`[funnel] item=${item.id} step=${step.id} stage=${stage} sent=${r.sent}${r.error ? ` err=${r.error}` : ''}`)
     }
   }
   return { resolved: true, checked, sent }

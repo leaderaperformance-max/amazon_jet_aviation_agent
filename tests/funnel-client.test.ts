@@ -24,6 +24,11 @@ describe('resolveFunnel', () => {
       funnelId: 9,
       steps: { start: 34, middle: 36, end: 38 },
       stepsByType: { start: [34], middle: [36], end: [38] },
+      stepList: [
+        { id: 34, step_type: 'start', identifier: 'leads_novos', title: null },
+        { id: 36, step_type: 'middle', identifier: 'oramento_enviado', title: null },
+        { id: 38, step_type: 'end', identifier: 'venda_fechada', title: null },
+      ],
     })
   })
 

@@ -15,6 +15,15 @@ export interface FunnelItem {
   conversation: { id: number; display_id: number; inbox_id: number }
 }
 
+export interface FunnelStep {
+  id: number
+  step_type: string
+  /** Identificador da coluna no Chatwoot, ex.: 'oramento_pendente'. */
+  identifier?: string | null
+  /** Nome exibido no kanban, ex.: 'Orçamento Pendente'. */
+  title?: string | null
+}
+
 export interface ResolvedFunnel {
   funnelId: number
   /** Primeira etapa de cada tipo — compatibilidade. Prefira `stepsByType`. */
@@ -25,6 +34,12 @@ export interface ResolvedFunnel {
    * entrariam no follow-up.
    */
   stepsByType: { start: number[]; middle: number[]; end: number[] }
+  /**
+   * Todas as colunas, na ordem do funil, COM nome. É por aqui que o follow-up
+   * escolhe o texto: as duas colunas 'middle' ('Orçamento Pendente' e
+   * 'Orçamento Enviado') são situações opostas pro cliente.
+   */
+  stepList: FunnelStep[]
 }
 
 function headers(cfg: ChatwootCfg) {
@@ -37,7 +52,7 @@ export async function resolveFunnel(cfg: ChatwootCfg, identifier: string): Promi
   if (!res.ok) throw new Error(`funnels ${res.status}`)
   const data = await res.json()
   const funnels = data.payload ?? data
-  const f = (funnels as Array<{ id: number; identifier: string; funnel_steps: Array<{ id: number; step_type: string }> }>)
+  const f = (funnels as Array<{ id: number; identifier: string; funnel_steps: FunnelStep[] }>)
     .find(x => x.identifier === identifier)
   if (!f) return null
   const allByType = (t: string) => f.funnel_steps.filter(s => s.step_type === t).map(s => s.id)
@@ -47,6 +62,7 @@ export async function resolveFunnel(cfg: ChatwootCfg, identifier: string): Promi
     funnelId: f.id,
     steps: { start: start[0], middle: middle[0], end: end[0] },
     stepsByType: { start, middle, end },
+    stepList: f.funnel_steps.map(s => ({ id: s.id, step_type: s.step_type, identifier: s.identifier ?? null, title: s.title ?? null })),
   }
 }
 
