@@ -578,9 +578,25 @@ export async function processIncomingMessage(
   const useQuepasa = !!(inbox.quepasa_host && inbox.quepasa_token)
   console.log(`[process] inbox=${inbox.id} conv=${conversationId} wasNew=${wasNew} hasIA=${hasAtendimentoIA} outbound=${useQuepasa ? 'quepasa' : 'chatwoot'}`)
 
+  // 🏷️ Marca a conversa como "da IA" ANTES de responder.
+  // No WhatsApp uma automação do Chatwoot põe a etiqueta ao abrir a conversa; no SITE,
+  // Instagram e e-mail NÃO existe essa automação. Se a etiqueta só entrasse depois da
+  // resposta e o envio falhasse (caso real: conversa 521 do site, 26/10/2026), a conversa
+  // ficava para sempre sem etiqueta — e da 2ª mensagem em diante a IA entendia "humano
+  // assumiu" e calava, sem nenhum humano ter tocado nela.
+  let labelsNow = labels
+  if (!hasAtendimentoIA && wasNew) {
+    try {
+      labelsNow = await addLabel(chatwootCfg, conversationId, labels, SYSTEM_LABEL)
+      await updateContactLabels(contact.id, labelsNow)
+    } catch (err) {
+      console.warn(`[process] etiqueta inicial falhou (não fatal):`, err)
+    }
+  }
+
   const { tools, getLabels } = buildAgentTools({
     inbox, conversationId, contactId: contact.id,
-    senderName, senderPhone, chatwootCfg, initialLabels: labels,
+    senderName, senderPhone, chatwootCfg, initialLabels: labelsNow,
     sessionId, reseller,
   })
 
@@ -624,7 +640,9 @@ export async function processIncomingMessage(
     }
   }
 
-  if (!hasAtendimentoIA) {
+  // Rede de segurança: se a etiqueta inicial não entrou (ex.: conversa que já existia
+  // antes da IA assumir), garante depois da resposta.
+  if (!getLabels().includes(SYSTEM_LABEL)) {
     try {
       const finalLabels = await addLabel(chatwootCfg, conversationId, getLabels(), SYSTEM_LABEL)
       await updateContactLabels(contact.id, finalLabels)

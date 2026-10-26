@@ -20,7 +20,11 @@ describe('resolveFunnel', () => {
     } as Response)
 
     const f = await resolveFunnel(cfg, 'amazon_jet_vendas')
-    expect(f).toEqual({ funnelId: 9, steps: { start: 34, middle: 36, end: 38 } })
+    expect(f).toEqual({
+      funnelId: 9,
+      steps: { start: 34, middle: 36, end: 38 },
+      stepsByType: { start: [34], middle: [36], end: [38] },
+    })
   })
 
   it('retorna null se o identifier não existe', async () => {

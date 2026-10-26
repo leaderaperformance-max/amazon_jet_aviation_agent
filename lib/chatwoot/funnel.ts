@@ -17,7 +17,14 @@ export interface FunnelItem {
 
 export interface ResolvedFunnel {
   funnelId: number
+  /** Primeira etapa de cada tipo — compatibilidade. Prefira `stepsByType`. */
   steps: { start: number; middle: number; end: number }
+  /**
+   * TODAS as etapas de cada tipo, na ordem do funil. O kanban do Amazon Jet tem DUAS
+   * etapas 'middle' (39 e 36) e a versão antiga só pegava a primeira — 23 cards nunca
+   * entrariam no follow-up.
+   */
+  stepsByType: { start: number[]; middle: number[]; end: number[] }
 }
 
 function headers(cfg: ChatwootCfg) {
@@ -33,10 +40,14 @@ export async function resolveFunnel(cfg: ChatwootCfg, identifier: string): Promi
   const f = (funnels as Array<{ id: number; identifier: string; funnel_steps: Array<{ id: number; step_type: string }> }>)
     .find(x => x.identifier === identifier)
   if (!f) return null
-  const byType = (t: string) => f.funnel_steps.find(s => s.step_type === t)?.id
-  const start = byType('start'), middle = byType('middle'), end = byType('end')
-  if (start == null || middle == null || end == null) return null
-  return { funnelId: f.id, steps: { start, middle, end } }
+  const allByType = (t: string) => f.funnel_steps.filter(s => s.step_type === t).map(s => s.id)
+  const start = allByType('start'), middle = allByType('middle'), end = allByType('end')
+  if (!start.length || !middle.length || !end.length) return null
+  return {
+    funnelId: f.id,
+    steps: { start: start[0], middle: middle[0], end: end[0] },
+    stepsByType: { start, middle, end },
+  }
 }
 
 export async function listFunnelItems(cfg: ChatwootCfg, funnelId: number, stepId: number): Promise<FunnelItem[]> {

@@ -135,9 +135,13 @@ export async function runFunnelAutomations(
   let checked = 0, sent = 0
   for (const slot of ['start', 'middle', 'end'] as const) {
     const stage = STAGE_BY_SLOT[slot]
-    const stepId = funnel.steps[slot]
+    // TODAS as etapas desse tipo: o kanban tem duas etapas 'middle' e a versão antiga
+    // só olhava a primeira, deixando uma coluna inteira de cards sem follow-up.
+    const stepIds = funnel.stepsByType?.[slot] ?? [funnel.steps[slot]]
     const threshold = thresholdSecFor(stage)
-    const items = await listFunnelItems(cfg, funnel.funnelId, stepId)
+    const items = (await Promise.all(
+      stepIds.map(stepId => listFunnelItems(cfg, funnel.funnelId, stepId)),
+    )).flat()
 
     for (const item of items) {
       checked++
