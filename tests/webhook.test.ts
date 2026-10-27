@@ -214,6 +214,40 @@ describe('POST /api/webhook (roteamento — fila QStash)', () => {
   })
 })
 
+describe('confirmação de entrega da ponte QuePasa (o loop de 27/10/2026)', () => {
+  // Payload real da conversa 525: o recibo chega como mensagem do CLIENTE e o
+  // corpo é o id da mensagem que acabamos de enviar.
+  const recibo = {
+    inbox_id: 45,
+    id: 525,
+    conversation: { labels: ['atendimento_ia'] },
+    messages: [{
+      id: 9001, content: '3EB0B98AECC7CF7E917159', message_type: 0,
+      conversation_id: 525,
+      sender_type: 'Contact',
+      source_id: 'deliveryreceipt',
+      content_attributes: { items: { quepasa: { from_device: false, msgid: 'deliveryreceipt' } } },
+      sender: { id: 82883, identifier: '5584991618585@s.whatsapp.net', phone_number: '+5584991618585', name: 'PAULO RICARDO' },
+    }],
+  }
+
+  it('não responde, não enfileira e não entra na memória', async () => {
+    const res = await POST(makeRequest(recibo))
+    expect(await res.json()).toMatchObject({ skipped: 'quepasa_receipt' })
+    expect(mockProcessIncoming).not.toHaveBeenCalled()
+    expect(mockSaveMessage).not.toHaveBeenCalled()
+  })
+
+  it('mensagem de verdade do mesmo cliente continua sendo atendida', async () => {
+    const real = {
+      ...recibo,
+      messages: [{ ...recibo.messages[0], id: 9002, content: 'Preciso cotar o PN 3244809-8', source_id: '3EB0C6342057AEE6BE2A71', content_attributes: { items: { quepasa: { from_device: false, msgid: '3EB0C6342057AEE6BE2A71' } } } }],
+    }
+    await POST(makeRequest(real))
+    expect(mockProcessIncoming).toHaveBeenCalled()
+  })
+})
+
 describe('atendente humano × eco do sistema × notas privadas', () => {
   it('eco de mensagem enviada pelo próprio sistema NÃO vira [atendente] (não tira a IA da conversa)', async () => {
     ;(isEchoOfOwnMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
