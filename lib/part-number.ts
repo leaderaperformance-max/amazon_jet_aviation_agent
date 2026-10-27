@@ -1,6 +1,7 @@
 import { generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { loadOpenAIConfig } from '@/lib/inboxes'
+import { looksLikeWhatsAppMessageId } from '@/lib/quepasa-receipt'
 
 export interface ValidationResult {
   valid: boolean
@@ -112,6 +113,16 @@ function normalize(candidate: string): string {
 
 export async function validatePartNumber(candidate: string): Promise<ValidationResult> {
   const normalized = normalize(candidate)
+
+  // Id de mensagem do WhatsApp nunca é peça. O padrão genérico lá embaixo aceitava
+  // "3EB0AA73505440D4AFFC02" com confiança alta e a IA respondia "Recebi o Part Number".
+  if (looksLikeWhatsAppMessageId(normalized)) {
+    return {
+      valid: false, format: 'Invalid', manufacturer: null,
+      confidence: 'high', normalized,
+      reason: 'É um id de mensagem do WhatsApp, não um Part Number',
+    }
+  }
 
   // Step 1: regex (without spaces — fast match)
   const compact = normalized.replace(/\s+/g, '')

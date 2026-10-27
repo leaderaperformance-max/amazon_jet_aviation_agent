@@ -9,6 +9,7 @@ import { isQStashEnabled, scheduleDrain } from '@/lib/qstash'
 import { processIncomingMessage, drainAndBuildContent, type IncomingContext } from '@/lib/process-incoming'
 import { isEchoOfOwnMessage } from '@/lib/human-handoff'
 import { isReactivationCommand, reactivateAI } from '@/lib/ia-reactivation'
+import { isQuepasaReceipt } from '@/lib/quepasa-receipt'
 
 // Webhook fica curto: recebe, enfileira, retorna. Processamento pesado vai
 // pro worker (/api/process-pending) via QStash. maxDuration baixo é suficiente.
@@ -30,6 +31,8 @@ interface ChatwootMessage {
   sender_type?: 'Contact' | 'User' | 'AgentBot'
   private?: boolean
   sender?: ChatwootSender
+  source_id?: string | null
+  content_attributes?: { items?: { quepasa?: { msgid?: string | null } } } | null
 }
 
 interface ChatwootConversation {
@@ -120,6 +123,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (message.sender_type === 'AgentBot') {
     console.log(`[webhook] SKIP: AgentBot (our own reply)`)
     return NextResponse.json({ ok: true })
+  }
+
+  // Confirmação de entrega da ponte QuePasa: chega como mensagem do cliente e o
+  // corpo é o id da mensagem que acabamos de mandar. Responder gera novo recibo —
+  // loop infinito. Sai antes de qualquer coisa: não entra na fila nem na memória.
+  if (isQuepasaReceipt(message)) {
+    console.log(`[webhook] SKIP: recibo da ponte (source_id=${message.source_id}) conv=${message.conversation_id}`)
+    return NextResponse.json({ ok: true, skipped: 'quepasa_receipt' })
   }
 
   // Dedup: Chatwoot may fire the same message_created event twice (inbox webhook + automation).
